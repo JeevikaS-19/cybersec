@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd.exe //c \"%CLAUDE_PROJECT_DIR%\\.claude\\verify.cmd\"",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

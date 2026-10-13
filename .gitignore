@@ -1,0 +1,17 @@
+# secrets and runtime data (never commit)
+*.db
+*.sqlite
+*.db-*
+keys/
+*.pem
+*.key
+anchor*.txt
+receipts/
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# local tool settings
+.claude/settings.local.json

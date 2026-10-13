@@ -1,0 +1,159 @@
+# 09 · Fixes to Apply (feed this whole file to Claude Code)
+
+This is the authoritative patch spec. Apply every change below to the named files. Where a decision was needed, the decision is already made — implement it as stated, don't re-derive it.
+
+**Priority order if time is short:** 1 (file sync) and 2 (signed heartbeat) and 3 (A1/A10 fix) are breaking — do these first. 4–10 are bugs that surface during the build — do these before 8:30. 11–13 are small — do last.
+
+---
+
+## 1. `02-flow.md` is out of sync — rewrite it to match `06-api-contract.md`
+
+`02-flow.md` currently still has the old single `running_balance_paise`, the old "timestamp close to now" check, and is missing `shared/`, registration, fast mode, and `/verify`. Rewrite it so it matches `06-api-contract.md` exactly:
+
+- **Step 1:** entry fields list must read `from_balance_paise`, `to_balance_paise` (not `running_balance_paise`). Note it's built in `shared/`, imported by `agent/` and `witness/`, not duplicated.
+- **Step 0:** add registration — agent calls `POST /register/agent` and feed calls `POST /register/feed` at startup, before sending anything else (see item 5 below for the response shape, which now returns a `key_id`).
+- **Step 2:** add fast mode (`--fast` / `FAST_MODE=1`) to the bank generator, used only for the T0 clean-run test; normal 1/sec pace stays for live demos.
+- **Step 4:** replace "timestamp close to now" with "timestamp monotonically later than the previous **accepted** entry" (see item 6 below for what "previous accepted" means once rejections don't cascade). Add that `GET /verify?from_seq&to_seq` exists from this step as a raw endpoint (Step 12 is just its UI). Add the periodic self-check described in item 3 below — this is what makes Layer 1 go red live during the Round 1 demo, not just on next-entry arrival.
+- **Step 13:** remove "add backdating check" (that's now in Step 4). Step 13 is just "random challenge timing" from here on.
+- Add `shared/` to the setup diagram and folder list.
+
+Everywhere else in `02-flow.md`, make sure folder names, routes, and field names match `06-api-contract.md` word for word. `06-api-contract.md` is the tiebreaker if anything still looks inconsistent after this rewrite.
+
+---
+
+## 2. Sign the heartbeat (`06-api-contract.md`)
+
+`POST /heartbeat` currently has no signature, so a killed agent's silence can be faked with an unsigned `curl` call, and A4 never fires.
+
+Change the heartbeat request to:
+```json
+{ "platform_id": "victim-bank-1", "timestamp": "...", "signature": "base64..." }
+```
+Signed payload = canonical encoding of `{platform_id, timestamp}` (profile_hash is removed — see item 10). Witness verifies the signature against the registered public key for that `platform_id` before accepting the heartbeat and resetting the silence timer. An unsigned or badly-signed heartbeat does not count as liveness — the silence alert still fires.
+
+---
+
+## 3. A1 and A10 are the same attack with two different expected results — fix with a periodic self-check
+
+Both attacks edit a stored entry directly in the witness's own SQLite. As written, nothing re-checks stored data after it's written, so neither one produces a live "Layer 1 red" — there's nothing for the Round 1 demo to trigger.
+
+**Decision: add a periodic self-check job in `witness/` (runs every 5 seconds).** It:
+1. Re-reads every stored entry and recomputes its `hash` from its current fields (via `shared/`'s canonical encoding). If the recomputed hash doesn't match the stored `hash` field, that row was edited after the fact directly in the database — flag it immediately as a chain-break alert, Layer 1 red.
+2. Checks `prev_hash` links and `seq` continuity across the full stored range for gaps (catches A2 as well).
+
+This is cheap: a row's own `hash` field already commits to all its other fields, so detecting a direct edit is a hash recompute-and-compare, not a full chain replay.
+
+**This resolves A1:** editing a row breaks its own self-consistency (step 1 above) within 5 seconds, independent of whether any new entry ever arrives. Demo it live: edit the DB, wait up to 5s, Layer 1 flips red with no new transaction needed.
+
+**This is why A10 still needs receipts + anchors, not just this job:** if the attacker has compromised the witness itself, they could edit a row *and* silence or falsify this same self-check (it's the witness's own process). A10's real defence stays external: signed receipts the agent/auditor hold independently, and anchors published off-box, which disagree with the rewritten witness even if its own self-check has been neutralized. Keep A10's expected result as "receipt and anchor mismatch," not the self-check — note this explicitly in `07-attacks.md` so the two attacks are clearly differentiated by *which* defence catches them, even though the mechanics of running the attack are the same.
+
+Update `07-attacks.md`'s table: A1 → "periodic self-check hash mismatch (Layer 1, live within 5s)"; A10 → "receipt and anchor mismatch (external to the witness, survives a fully compromised witness)." Update `05-self-tests.md` T1b and T4b to describe the same distinction.
+
+---
+
+## 4. Genesis `prev_hash` is undefined for base64 hashes
+
+The old "64 zeros" convention was for hex-encoded hashes. `06-api-contract.md` uses base64. Define in `shared/`:
+```
+GENESIS_PREV_HASH = base64 encoding of 32 zero bytes
+# i.e. base64.b64encode(b"\x00" * 32) == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+```
+The first entry from any agent (`seq = 0`) uses this constant as its `prev_hash`. Document this constant in `shared/` and reference it from `06-api-contract.md`'s entry section.
+
+---
+
+## 5. No mapping from `key_id` to a registered key — fix the registration response
+
+`POST /register/agent` must assign and return a `key_id`:
+```json
+// request
+{ "platform_id": "victim-bank-1", "public_key": "base64..." }
+// response
+{ "status": "registered", "platform_id": "victim-bank-1", "key_id": "agent-key-0" }
+```
+Same shape for `POST /register/feed` (returns a `key_id` for the feed's key too, used the same way for its signature checks). Witness stores `key_id -> public_key` per `platform_id`, and every incoming entry's `key_id` is looked up in this table before its signature is checked — an unrecognized `key_id` is a rejection (`reason: "unknown_key_id"`), not a crash. Key rotation (item 7) adds new `key_id`s to this same table over time; it's a growing map, not a single current key.
+
+---
+
+## 6. Rejected entries must not cascade-fail everything after them
+
+Currently nothing says what the chain's "good tip" is after a rejection, so every later entry also fails against a broken reference, and one attack floods the whole alert list.
+
+**Decision:** the witness tracks `last_good_seq` / `last_good_hash` separately from "last entry received." Only *accepted* entries advance `last_good_*`. New incoming entries are validated against `last_good_*`, never against a rejected entry. A rejected entry is stored (for audit evidence) and raises exactly one alert; it does not change what the next entry is checked against. Since the agent's own local state is untouched by an attack on the witness's stored data (A1/A2/A10 all tamper with the witness's copy, not the agent), the agent's next real entry continues incrementing normally from its own last successfully-delivered entry and will validate cleanly against `last_good_*`.
+
+Update `06-api-contract.md`'s `/entries` section with this rule, and update item 1's Step 4 rewrite in `02-flow.md` to say the same thing (validate against `last_good_*`, not against the previous arrival regardless of its outcome).
+
+---
+
+## 7. No key rotation route — add one
+
+Step 10 rotates keys but `06-api-contract.md` has no endpoint. Add:
+
+### `POST /keys/rotate`
+```json
+// request
+{ "platform_id": "victim-bank-1", "new_public_key": "base64...", "signature": "base64..." }
+// signed payload = canonical encoding of {platform_id, new_public_key}, signed with the OLD private key
+// response
+{ "status": "rotated", "key_id": "agent-key-1", "effective_from_seq": 101 }
+```
+Witness verifies the signature against the *currently registered* key for that `platform_id` before accepting — this is what makes the rotation itself provable (old key attests to the new one) and prevents a random third party from rotating someone else's keys. After rotation, the old `key_id` stays valid for verifying *past* entries signed before `effective_from_seq`; only new entries must use the new `key_id`.
+
+---
+
+## 8. Mock anchor needs a pull route, since Laptop C can't receive calls
+
+Laptop C only makes outbound calls (poll design). Add:
+
+### `GET /anchor/latest`
+```json
+{ "chain_head_hash": "base64...", "anchored_at": "...", "signature": "base64..." }
+```
+Laptop C polls this every few minutes and appends what it gets to its local anchor file. This keeps the "witness never calls out" rule intact — C is still the one initiating the call.
+
+---
+
+## 9. Define exactly what gets signed, and add `last_seq` to the hash-challenge reply
+
+"Signed over the fields listed" names no concrete field list anywhere. Make it explicit in `06-api-contract.md`:
+- **Entry signature:** canonical encoding (via `shared/`) of every entry field *except* `signature` itself (i.e. `seq` through `hash`, in the order listed in Step 1 / the entry schema).
+- **Heartbeat signature:** canonical encoding of `{platform_id, timestamp}` (see item 2).
+- **Hash-challenge response signature:** canonical encoding of `{challenge_id, type, latest_hash, last_seq}`. **Add `last_seq` to this response** (it's currently only on the state-challenge response) — the witness needs it to tell whether a reply is for the agent's actual current tip or a stale/replayed one, same reasoning as the state challenge.
+- **State-challenge response signature:** canonical encoding of `{challenge_id, type, account, balance_paise, last_seq}`.
+- **Feed confirmation signature:** canonical encoding of `{txn_id, from_account, to_account, amount_paise, confirmed_at}`.
+- **Key rotation signature:** see item 7.
+
+---
+
+## 10. A8 and `profile_hash` depend on profiles, which are slide-only — remove both
+
+Profiles aren't being built (architecture slide only), so there's nothing for a `profile_hash` in the heartbeat to check against, and A8 has no real mechanism behind it.
+
+**Decision:** remove `profile_hash` from the heartbeat request entirely (already done in item 2's new heartbeat shape — just confirming it's intentional, not an oversight). Drop A8 from the build list in `07-attacks.md`: move it from the numbered attack table into the "slide-only, not built" note, next to multi-platform profiles, with a one-line reason ("depends on a profile system that's slide-only this event").
+
+---
+
+## 11. T2d needs a real comparison tool, not just `/verify` alone
+
+`GET /verify` only re-checks the witness's *own* stored copy against itself — it has nothing to compare against the agent's local copy, so T2d (local vs. witness mismatch after truncating the agent's local entries) has nothing to run.
+
+Add:
+
+### `POST /verify/compare`
+```json
+// request
+{ "entries": [ /* array of the agent's local entries, same shape as /entries payloads */ ] }
+// response
+{ "mismatches": [ { "seq": 17, "reason": "missing_locally" | "hash_mismatch" | "extra_locally" } ], "match_count": 41 }
+```
+Build a small script in `attacks/` (e.g. `compare_local.py`) that reads the agent's local SQLite, sends its entries to this endpoint, and prints the mismatches. This is what T2d, A3, and A7 actually run against — update `05-self-tests.md` and `07-attacks.md` to call `/verify/compare` by name instead of just "`/verify`" for anything that compares local vs. witness state. Plain `/verify` stays for range-checking the witness's own copy against itself (used by the auditor tab, Step 12).
+
+---
+
+## 12. Round 2 fallback demo (Step 8 may slip)
+
+Steps 7 and 8 (state challenge + feed) both need to land between 4:00 and 6:30 PM for the full Round 2 demo (`all green → A1 → A4 → A12 → A13`) to work. That's tight — if the feed (Step 8) isn't ready by the 6:30 freeze, **have this fallback ready and rehearsed, not improvised live:**
+
+**Round 2 fallback demo (no feed):** all green → A1 edit (Layer 1 red, live via the periodic self-check from item 3) → A4 kill agent (Layer 2 red) → A12 DB edit (Layer 3 red via the state challenge only). Stop there — skip A13. State in the pitch that the confirmation-feed layer is still being wired in and will be in the final demo. This still shows all three layers and the headline "only we catch this" moment (A12), just without the second Layer-3 attack.
+
+Add this as an explicit fallback note in `03-pitch-demo.md`'s Round 2 section, next to the main demo order, not buried — the team should decide which one they're running by 6:30, not mid-demo.
