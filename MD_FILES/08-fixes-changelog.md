@@ -35,3 +35,4 @@
 - Deception mode added (default): decoy editor, real log untouched, attempted diff captured as evidence. `block` mode kept as a switch.
 - Events path: producers write to a spool, the agent signs and sends `POST /events`; wrappers never hold the agent key. `/events` gains a `detail` field.
 - File commands trip only on log paths; editors always trip.
+- Team access changed: `coc-*` commands and the revert key are gone. The team uses `<cmd> --<profile-id>` (per-platform secret, scrypt hash only); guarded commands and paths come from config.

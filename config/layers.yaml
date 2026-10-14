@@ -10,5 +10,10 @@ checks:
   classifier: true
 
 layer1:
-  mode: deception        # deception = decoy editor, real log untouched, attempted diff captured; block = refuse
-  log_dir: /var/log/bank
+  mode: deception              # deception = decoy editor, real file untouched, attempted diff captured; block = refuse
+  protected_paths:             # file commands trip only inside these
+    - /var/log/bank
+  editors: [nano, vi, vim, gedit]                           # trip on any file without the profile-id
+  file_commands: [rm, mv, cp, sed, truncate, shred, cat]    # trip inside protected_paths without the profile-id
+  watch_cd: true               # cd into a protected path is reported
+  profiles_file: /etc/coc/profiles   # profile-id hashes per platform (python -m layers.l1_tripwire.profiles add <platform>)

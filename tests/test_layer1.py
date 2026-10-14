@@ -106,39 +106,62 @@ def test_agent_ships_spooled_events(witness, tmp_path, monkeypatch):
     assert [x["kind"] for x in _alerts(witness.url)] == ["layer1_tripwire"]
 
 
-def test_only_log_paths_trip_file_commands(tmp_path):
+def test_only_protected_paths_trip_file_commands(tmp_path):
     from layers.l1_tripwire import trip
 
     log_dir = tmp_path / "log"
     log_dir.mkdir()
     (log_dir / "app.log").write_text("x")
-    assert trip.log_targets(["-f", str(log_dir / "app.log"), str(tmp_path / "other.txt")], str(log_dir)) == [
+    roots = [str(log_dir)]
+    assert trip.protected_targets(["-f", str(log_dir / "app.log"), str(tmp_path / "other.txt")], roots) == [
         str(log_dir / "app.log")]
-    assert trip.log_targets([str(tmp_path / "other.txt")], str(log_dir)) == []
-    assert trip.under(str(log_dir / ".." / "log" / "app.log"), str(log_dir))  # ../ tricks resolve first
+    assert trip.protected_targets([str(tmp_path / "other.txt")], roots) == []
+    assert trip.under(str(log_dir / ".." / "log" / "app.log"), roots)  # ../ tricks resolve first
 
 
-def test_deception_rm_reports_success_and_changes_nothing(tmp_path, monkeypatch):
+def test_guarded_commands_come_from_config(tmp_path, monkeypatch):
     from layers.l1_tripwire import trip
 
+    cfg = tmp_path / "layers.yaml"
+    cfg.write_text("layer1:\n  editors: [micro]\n  file_commands: [rm, rm]\n")
+    monkeypatch.setattr(layer_events, "LAYERS_CONFIG", cfg)
+    assert trip.guarded_commands() == ["micro", "rm"]
+
+
+def _l1_env(tmp_path, monkeypatch, mode):
     log = tmp_path / "log" / "app.log"
     log.parent.mkdir()
     log.write_text("txn-1\n")
-    monkeypatch.setenv("COC_LOG_DIR", str(log.parent))
-    monkeypatch.setenv("COC_L1_MODE", "deception")
+    monkeypatch.setenv("COC_PROTECTED", str(log.parent))
+    monkeypatch.setenv("COC_L1_MODE", mode)
     monkeypatch.setenv("COC_SPOOL", str(tmp_path / "spool"))
+    monkeypatch.setenv("COC_PROFILES", str(tmp_path / "profiles"))
+    return log
+
+
+def test_intruder_rm_is_deceived_and_block_mode_refuses(tmp_path, monkeypatch):
+    from layers.l1_tripwire import trip
+
+    log = _l1_env(tmp_path, monkeypatch, "deception")
     assert trip.run("rm", [str(log)]) == 0
     assert log.read_text() == "txn-1\n"
-    assert len(layer_events.pending()) == 1
     monkeypatch.setenv("COC_L1_MODE", "block")
     assert trip.run("truncate", ["-s", "0", str(log)]) == 1
     assert log.read_text() == "txn-1\n"
+    states = [json.loads(p.read_text())["state"] for p in layer_events.pending()]
+    assert states == ["alert", "alert"]
 
 
-def test_revert_key_stored_only_as_hash(tmp_path, monkeypatch):
-    from layers.l1_tripwire import coc
+def test_profile_id_authorizes_and_is_never_logged(tmp_path, monkeypatch):
+    from layers.l1_tripwire import profiles, trip
 
-    monkeypatch.setenv("COC_ETC", str(tmp_path))
-    coc.set_key("correct horse")
-    assert "correct horse" not in coc.hash_file().read_text()
-    assert coc.check_key("correct horse") and not coc.check_key("wrong")
+    log = _l1_env(tmp_path, monkeypatch, "deception")
+    profiles.add("demo-bank", "bank-7f3a9c2e")
+    assert "bank-7f3a9c2e" not in (tmp_path / "profiles").read_text()
+    assert profiles.match("bank-7f3a9c2e") == "demo-bank" and profiles.match("wrong-guess") is None
+    monkeypatch.setattr(trip, "run_real", lambda name, args: 0)
+    assert trip.run("rm", ["--bank-7f3a9c2e", str(log)]) == 0
+    (event,) = [json.loads(p.read_text()) for p in layer_events.pending()]
+    assert event["trigger"] == "authorized:rm" and event["state"] == "normal"
+    assert event["detail"]["profile"] == "demo-bank"
+    assert "bank-7f3a9c2e" not in json.dumps(event)

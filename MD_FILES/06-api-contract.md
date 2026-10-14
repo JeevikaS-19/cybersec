@@ -117,7 +117,7 @@ Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so t
 // response
 { "status": "accepted" }
 ```
-`detail` is a free-form object (`cmd`, `mode`, `target`, and for deception the attempted `diff`). `state: "alert"` raises a `layer1_tripwire` alert and sets `/status` layer 1 to `tripped`; `state: "normal"` (e.g. a successful `coc-unlock`) is logged to `/timeline` only. Bad signature or unknown key: `{"status": "rejected", "reason": ...}` and a `forged` alert. `bundle_key`/`bundle_hash` are `null` until the vault exists (Step 7).
+`detail` is a free-form object (`cmd`, `mode`, `target`, and for deception the attempted `diff`). `state: "alert"` raises a `layer1_tripwire` alert and sets `/status` layer 1 to `tripped`; `state: "normal"` (e.g. `authorized:nano`, a team member using a valid profile-id) is logged to `/timeline` only. Bad signature or unknown key: `{"status": "rejected", "reason": ...}` and a `forged` alert. `bundle_key`/`bundle_hash` are `null` until the vault exists (Step 7).
 
 `bundle_key` is the object name in the vault. The auditor view checks that the vault object's hash equals `bundle_hash` and that its signature is valid.
 

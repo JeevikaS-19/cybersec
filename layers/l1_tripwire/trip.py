@@ -1,9 +1,13 @@
-"""Layer 1 command tripwire. Every wrapper in the trip bin dir runs: python3 -m layers.l1_tripwire.trip <name> <args>.
+"""Layer 1 command tripwire. Each wrapper runs: python3 -m layers.l1_tripwire.trip <name> <args>.
 
-block mode:     alert, print a plain error, real command never runs.
-deception mode: alert, then let the intruder "succeed" against a decoy. The real log is never touched;
-                when they save, the diff of what they tried to change goes to the witness as evidence.
-Stdlib only, so it runs on a bare log server.
+The team runs a guarded command with its platform's secret profile-id as the first argument:
+    nano --<profile-id> /var/log/bank/app.log
+The flag is checked against stored hashes, stripped, and the real command runs; the use is logged (no alert).
+Without it, the command trips:
+    deception mode: alert, then the intruder "succeeds" against a decoy. The real file is never touched;
+                    on save, the diff of what they tried to change goes to the witness as evidence.
+    block mode:     alert, plain error, the real command never runs.
+Which commands and paths are guarded comes from config/layers.yaml (layer1). Stdlib + pyyaml only.
 """
 
 import difflib
@@ -17,13 +21,13 @@ from pathlib import Path
 
 from layers.common import events
 
-EDITORS = {"nano", "vi", "vim", "gedit"}
-FILE_CMDS = {"rm", "mv", "cp", "sed", "truncate", "shred", "cat"}
 DIFF_LIMIT = 4000
+DEFAULTS = {"mode": "deception", "protected_paths": ["/var/log/bank"], "editors": [], "file_commands": [],
+            "watch_cd": True, "profiles_file": "/etc/coc/profiles"}
 
 
 def settings():
-    cfg = {"mode": "deception", "log_dir": "/var/log/bank"}
+    cfg = dict(DEFAULTS)
     try:
         import yaml
         with open(events.LAYERS_CONFIG, encoding="utf-8") as f:
@@ -31,19 +35,26 @@ def settings():
     except Exception:  # noqa: BLE001, S110 - no config or no yaml: keep safe defaults, never fail open
         pass
     cfg["mode"] = os.environ.get("COC_L1_MODE", cfg["mode"])
-    cfg["log_dir"] = os.environ.get("COC_LOG_DIR", cfg["log_dir"])
+    if os.environ.get("COC_PROTECTED"):
+        cfg["protected_paths"] = os.environ["COC_PROTECTED"].split(os.pathsep)
     return cfg
 
 
-def under(path, log_dir):
+def guarded_commands(cfg=None):
+    cfg = cfg or settings()
+    return list(dict.fromkeys([*cfg["editors"], *cfg["file_commands"]]))
+
+
+def under(path, roots):
     try:
-        return Path(path).expanduser().resolve().is_relative_to(Path(log_dir).resolve())
+        p = Path(path).expanduser().resolve()
+        return any(p.is_relative_to(Path(r).resolve()) for r in roots)
     except (OSError, ValueError):
         return False
 
 
-def log_targets(args, log_dir):
-    return [a for a in args if not a.startswith("-") and under(a, log_dir)]
+def protected_targets(args, roots):
+    return [a for a in args if not a.startswith("-") and under(a, roots)]
 
 
 def real_binary(name):
@@ -57,54 +68,77 @@ def real_binary(name):
     return found
 
 
-def alert(name, args, detail):
-    detail = {"cmd": shlex.join([name, *args]), "cwd": os.getcwd(), "tty": os.environ.get("SSH_TTY") or "", **detail}
-    return events.emit(events.make_event(1, f"wrapper:{name}", detail, process=name, exe=real_binary(name)))
+def authorized(args):
+    """(platform, remaining args) if the first argument is a valid --<profile-id>, else (None, args)."""
+    if not args or not args[0].startswith("--") or len(args[0]) < 4:
+        return None, args
+    from layers.l1_tripwire import profiles
+    platform = profiles.match(args[0][2:])
+    return (platform, args[1:]) if platform else (None, args)
 
 
-def deceive_editor(name, args, targets):
-    target = Path(targets[0]).resolve()
+def emit(name, trigger, args, detail, state="alert"):
+    detail = {"cmd": shlex.join([name, *args]), "cwd": os.getcwd(), **detail}
+    return events.emit(events.make_event(1, trigger, detail, state=state, process=name, exe=real_binary(name)))
+
+
+def deceive_editor(name, args, target):
+    target_path = Path(target).resolve()
     decoy_dir = Path(tempfile.mkdtemp(prefix=".coc-"))
-    decoy = decoy_dir / target.name
-    original = target.read_text(errors="replace") if target.exists() else ""
+    decoy = decoy_dir / target_path.name
+    original = target_path.read_text(errors="replace") if target_path.exists() else ""
     decoy.write_text(original)
     editor = real_binary(name)
     if editor:
-        subprocess.call([editor, *[str(decoy) if a == targets[0] else a for a in args]])
+        subprocess.call([editor, *[str(decoy) if a == target else a for a in args]])
     attempted = decoy.read_text(errors="replace") if decoy.exists() else ""
     shutil.rmtree(decoy_dir, ignore_errors=True)
     if attempted != original:
         diff = "".join(difflib.unified_diff(original.splitlines(True), attempted.splitlines(True),
-                                            str(target), f"{target} (attempted)"))
-        events.emit(events.make_event(1, f"deception:{name}", {
-            "cmd": shlex.join([name, *args]), "mode": "deception", "target": str(target),
-            "diff": diff[:DIFF_LIMIT], "diff_truncated": len(diff) > DIFF_LIMIT,
-        }, process=name, exe=editor))
+                                            str(target_path), f"{target_path} (attempted)"))
+        emit(name, f"deception:{name}", args, {"mode": "deception", "target": str(target_path),
+                                               "diff": diff[:DIFF_LIMIT], "diff_truncated": len(diff) > DIFF_LIMIT})
     return 0
+
+
+def run_real(name, args):
+    real = real_binary(name)
+    return subprocess.call([real, *args]) if real else 127
 
 
 def run(name, args):
     cfg = settings()
-    targets = log_targets(args, cfg["log_dir"])
     if name == "cd":
-        if targets:
-            alert(name, args, {"mode": cfg["mode"], "target": targets[0]})
+        targets = protected_targets(args, cfg["protected_paths"])
+        if cfg["watch_cd"] and targets:
+            emit(name, "wrapper:cd", args, {"mode": cfg["mode"], "target": targets[0]})
         return 0  # the shell function does the real cd
-    if name not in EDITORS and not targets:
-        real = real_binary(name)
-        return subprocess.call([real, *args]) if real else 127
-    alert(name, args, {"mode": cfg["mode"], "targets": targets})
+    is_editor = name in cfg["editors"]
+    platform, rest = authorized(args)
+    targets = protected_targets(rest, cfg["protected_paths"])
+    if not is_editor and not targets and platform is None:
+        return run_real(name, args)  # ordinary use outside the protected paths
+    if platform:
+        # rest never contains the profile-id, so it is never logged or sent
+        emit(name, f"authorized:{name}", rest, {"profile": platform, "targets": targets}, state="normal")
+        return run_real(name, rest)
+    emit(name, f"wrapper:{name}", args, {"mode": cfg["mode"], "targets": targets})
     if cfg["mode"] != "deception":
         print(f"{name}: {targets[0] if targets else ''}: Operation not permitted", file=sys.stderr)
         return 1
-    if name in EDITORS:
-        return deceive_editor(name, args, targets) if targets else subprocess.call([real_binary(name), *args])
+    if is_editor:
+        return deceive_editor(name, args, targets[0]) if targets else run_real(name, args)
     if name == "cat":
-        return subprocess.call([real_binary("cat"), *args])  # reading is harmless; the alert already fired
-    return 0  # rm, mv, cp, sed, truncate, shred: report success, change nothing
+        return run_real(name, args)  # reading is harmless; the alert already fired
+    return 0  # file-changing commands report success and change nothing
 
 
 def main():
+    if sys.argv[1:] == ["--list-commands"]:
+        print(" ".join(guarded_commands()))
+        return 0
+    if sys.argv[1:] == ["--watch-cd"]:
+        return 0 if settings()["watch_cd"] else 1
     if len(sys.argv) < 2:
         print("usage: trip <command> [args...]", file=sys.stderr)
         return 2
