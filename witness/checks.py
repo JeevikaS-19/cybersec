@@ -274,6 +274,9 @@ def status(conn, layers):
     kinds = {r["kind"] for r in conn.execute("SELECT kind FROM alerts WHERE resolved = 0")}
     last = _last_accepted(conn)
     hb = get_state(conn, "last_heartbeat") or {}
+    agent = conn.execute("SELECT platform_id FROM agents ORDER BY rowid LIMIT 1").fetchone()
+    age = now() - hb["recv"] if hb.get("recv") is not None and hb.get("ts") else None
+    connection = "waiting" if age is None else ("connected" if age <= SILENCE_SECONDS else "lost")
     return {
         "checks": {
             "A": "red" if kinds & A_KINDS else "green",
@@ -288,6 +291,13 @@ def status(conn, layers):
         "state": "alert" if kinds else "normal",
         "last_entry_seq": last["seq"] if last else 0,
         "last_seen": hb.get("ts") or "",
+        # Screen 0 of the auditor view
+        "platform_id": agent["platform_id"] if agent else None,
+        "connection": connection,
+        "heartbeat_age": round(age, 1) if age is not None else None,
+        "records_verified": conn.execute("SELECT COUNT(*) FROM entries WHERE accepted = 1").fetchone()[0],
+        "last_verified": {"seq": last["seq"], "time": last["timestamp"]} if last else None,
+        "last_sweep": get_state(conn, "last_sweep"),
     }
 
 def list_alerts(conn):

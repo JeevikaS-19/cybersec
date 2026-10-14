@@ -111,7 +111,8 @@ def run(name, args):
     if name == "cd":
         targets = protected_targets(args, cfg["protected_paths"])
         if cfg["watch_cd"] and targets:
-            emit(name, "wrapper:cd", args, {"mode": cfg["mode"], "target": targets[0]})
+            emit(name, "wrapper:cd", args, {"mode": cfg["mode"], "target": targets[0], "result": "allowed (reported)",
+                                            "rule": f"Entered protected path {targets[0]}"})
         return 0  # the shell function does the real cd
     is_editor = name in cfg["editors"]
     platform, rest = authorized(args)
@@ -120,9 +121,13 @@ def run(name, args):
         return run_real(name, args)  # ordinary use outside the protected paths
     if platform:
         # rest never contains the profile-id, so it is never logged or sent
-        emit(name, f"authorized:{name}", rest, {"profile": platform, "targets": targets}, state="normal")
+        emit(name, f"authorized:{name}", rest, {"profile": platform, "targets": targets,
+                                                "result": f"allowed (profile {platform})"}, state="normal")
         return run_real(name, rest)
-    emit(name, f"wrapper:{name}", args, {"mode": cfg["mode"], "targets": targets})
+    rule = (f"Write to protected path {targets[0]} without a profile-id" if targets and not is_editor
+            else f"Editor '{name}' used without a profile-id")
+    result = "blocked" if cfg["mode"] != "deception" else ("allowed (read only)" if name == "cat" else "deceived (decoy)")
+    emit(name, f"wrapper:{name}", args, {"mode": cfg["mode"], "targets": targets, "rule": rule, "result": result})
     if cfg["mode"] != "deception":
         print(f"{name}: {targets[0] if targets else ''}: Operation not permitted", file=sys.stderr)
         return 1

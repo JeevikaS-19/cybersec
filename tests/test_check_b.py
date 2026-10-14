@@ -79,3 +79,15 @@ def test_auditor_view_shows_heartbeats_and_challenges(witness, monkeypatch):
     assert kinds == ["heartbeat", "challenge_issued"]
     page = requests.get(witness.url + "/", timeout=5)
     assert page.status_code == 200 and "auditor view" in page.text
+
+
+def test_status_reports_connection_and_verified_records(witness):
+    a = Agent(witness.url)
+    s = requests.get(f"{witness.url}/status", timeout=5).json()
+    assert s["connection"] == "waiting" and s["records_verified"] == 0 and s["last_verified"] is None
+    a.send(a.next_entry())
+    a.send(a.next_entry())
+    a.heartbeat(ts(3))
+    s = requests.get(f"{witness.url}/status", timeout=5).json()
+    assert s["connection"] == "connected" and s["platform_id"] == "log-server-1"
+    assert s["records_verified"] == 2 and s["last_verified"] == {"seq": 2, "time": ts(2)}

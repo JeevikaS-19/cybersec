@@ -34,10 +34,19 @@ def layer_enabled(layer):
         return True  # a missing or broken config must not silence the tripwire
 
 
+def _username(uid):
+    try:
+        import pwd
+        return pwd.getpwuid(uid).pw_name
+    except (ImportError, KeyError, TypeError):
+        return os.environ.get("USER") or os.environ.get("USERNAME")
+
+
 def who(process=None):
-    info = {"auid": None, "uid": None, "process": process, "exe": None, "src_ip": None}
+    info = {"auid": None, "uid": None, "user": None, "process": process, "exe": None, "src_ip": None}
     if hasattr(os, "getuid"):
         info["uid"] = os.getuid()
+    info["user"] = _username(info["uid"])
     try:
         auid = int(Path("/proc/self/loginuid").read_text().strip())
         info["auid"] = None if auid == 4294967295 else auid  # login uid survives sudo/su
