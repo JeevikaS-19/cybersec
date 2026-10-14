@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS state (
 """
 
 def connect(db_path):
-    conn = sqlite3.connect(db_path, timeout=10)
+    # One connection per request; FastAPI may open it and use it on different threadpool threads.
+    conn = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 

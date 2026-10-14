@@ -6,8 +6,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import yaml
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import Body, Depends, FastAPI, HTTPException
 
+from shared import export_public_key
 from witness import checks
 from witness.store import connect, get_state, init_db, set_state
 
@@ -17,6 +19,19 @@ DEFAULT_LAYERS = Path(__file__).resolve().parents[1] / "config" / "layers.yaml"
 def load_config(path):
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def load_or_create_key(path):
+    # Witness signing key (Layer 3 commands). Raw 32 bytes on disk, never printed or sent.
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return ed25519.Ed25519PrivateKey.from_private_bytes(f.read())
+    priv = ed25519.Ed25519PrivateKey.generate()
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(priv.private_bytes_raw())
+    return priv
 
 
 def _check_loop(db_path, config, stop):
@@ -39,6 +54,8 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     db_path = db_path or os.environ.get("WITNESS_DB_PATH", "witness.db")
     init_db(db_path)
     config = load_config(layers_path)
+    key_path = os.environ.get("WITNESS_KEY_PATH") or os.path.splitext(db_path)[0] + ".key"
+    witness_public_key = export_public_key(load_or_create_key(key_path))
     stop = threading.Event()
 
     @asynccontextmanager
@@ -78,7 +95,7 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
                              (key_id, platform_id, public_key))
         if get_state(conn, "last_heartbeat") is None:
             set_state(conn, "last_heartbeat", {"ts": None, "recv": checks.now()})
-        return {"status": "registered", "platform_id": platform_id, "key_id": key_id, "witness_public_key": None}
+        return {"status": "registered", "platform_id": platform_id, "key_id": key_id, "witness_public_key": witness_public_key}
 
     @app.post("/entries")
     def post_entry(entry: dict = Body(...), conn=Depends(get_conn)):

@@ -142,6 +142,7 @@ def send_pending(conn):
             conn.execute("UPDATE entries SET sent = 1, accepted = ? WHERE seq = ?", (int(accepted), seq))
         if not accepted:
             print(f"witness rejected seq {seq}: {result.get('reason')}")
+    return len(rows)
 
 
 def send_heartbeat(priv):
@@ -212,6 +213,7 @@ def main():
     priv = load_or_create_key(conn)
     last_heartbeat = last_poll = 0.0
     while True:
+        backlog = False
         try:
             if meta_get(conn, "key_id") is None:
                 register(conn, priv)
@@ -220,13 +222,14 @@ def main():
                 send_heartbeat(priv)
                 last_heartbeat = now
             sync_bank(conn, priv)
-            send_pending(conn)
+            backlog = send_pending(conn) == SEND_BATCH
             if now - last_poll >= CHALLENGE_SECONDS:
                 answer_challenge(conn, priv)
                 last_poll = now
         except requests.RequestException as exc:
             print(f"witness unreachable: {exc.__class__.__name__}")
-        time.sleep(1)
+        if not backlog:  # catch up at full speed, idle at 1 s
+            time.sleep(1)
 
 
 if __name__ == "__main__":

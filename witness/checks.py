@@ -108,18 +108,21 @@ def submit_entry(conn, entry, now_ts, check_c=True):
     return {"status": "rejected", "reason": reason}
 
 def self_check(conn, now_ts):
+    rows = list(conn.execute("SELECT * FROM entries WHERE accepted = 1 ORDER BY id"))
+    seqs = {r["seq"] for r in rows}
+    # Deletions: any seq missing from 1..max, whatever order the rest are stored in.
+    for missing in sorted(set(range(1, max(seqs, default=0) + 1)) - seqs):
+        add_alert(conn, "entry_deleted", missing, "entry_deleted", f"seq {missing} missing from stored chain", now_ts)
     prev = None
-    for row in conn.execute("SELECT * FROM entries WHERE accepted = 1 ORDER BY id"):
+    for row in rows:
         entry = {f: row[f] for f in ENTRY_FIELDS}
         if hash_entry(entry) != row["hash"]:
             add_alert(conn, "entry_edited", row["seq"], "entry_edited", "stored fields no longer match hash", now_ts)
-        elif prev is not None and row["seq"] > prev["seq"] + 1:
-            add_alert(conn, "entry_deleted", row["seq"], "entry_deleted", f"seq jumps from {prev['seq']} to {row['seq']}", now_ts)
         elif prev is not None and row["seq"] == prev["seq"]:
             add_alert(conn, "entry_replayed", row["seq"], "entry_replayed", f"seq {row['seq']} stored twice", now_ts)
         elif prev is not None and row["seq"] < prev["seq"]:
             add_alert(conn, "entries_reordered", row["seq"], "entries_reordered", f"seq {row['seq']} stored after {prev['seq']}", now_ts)
-        elif prev is not None and row["prev_hash"] != prev["hash"]:
+        elif prev is not None and row["seq"] == prev["seq"] + 1 and row["prev_hash"] != prev["hash"]:
             add_alert(conn, "entries_reordered", row["seq"], "entries_reordered", "prev_hash does not link", now_ts)
         prev = row
 

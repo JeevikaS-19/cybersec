@@ -47,7 +47,7 @@ def test_t1c_deleted_middle_entry_flags_sequence_gap(witness):
     for _ in range(3):
         a.send(a.next_entry())
     _run(witness.db, "DELETE FROM entries WHERE seq = 2")
-    assert _alerts(witness.db) == [("entry_deleted", "3", "entry_deleted")]
+    assert _alerts(witness.db) == [("entry_deleted", "2", "entry_deleted")]
 
 
 def test_t1d_swapped_entries_are_sequence_error(witness):
@@ -119,3 +119,4 @@ def test_swapped_stored_rows_are_entries_reordered(witness):
     _run(witness.db)
     kinds = {(k, ref) for k, ref, _ in _alerts(witness.db)}
     assert ("entries_reordered", "2") in kinds
+    assert not any(k == "entry_deleted" for k, _ in kinds)  # a swap is not a deletion
