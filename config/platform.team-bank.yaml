@@ -1,0 +1,27 @@
+# Example: the team's Node/PostgreSQL bank (jrush-vj/chain-of-custody-firewallcrew, banking-system/).
+# Use with COC_PLATFORM_CONFIG=config/platform.team-bank.yaml and a READ-ONLY database user:
+#   CREATE ROLE coc_reader LOGIN PASSWORD '...';
+#   GRANT SELECT ON transactions, accounts TO coc_reader;
+#   export COC_DB_DSN='postgresql://coc_reader:...@127.0.0.1:5432/bankingsystem'
+platform_id: firewallcrew-bank
+witness_url: https://witness.example:8000
+source:
+  kind: postgres
+  dsn: env:COC_DB_DSN              # never put the password in this file
+  transactions:
+    table: transactions
+    where: "status = 'completed'"
+    columns:
+      row_id: id
+      time: timestamp
+      from_account: from_account_id
+      to_account: to_account_id
+      amount: amount               # DECIMAL(18,2) rupees
+    amount_unit: rupees
+    txn_id_prefix: "bank-txn-"     # no txn_id column: ids become bank-txn-<id>
+  accounts:
+    table: accounts
+    id: id
+    balance: balance               # DECIMAL(18,2)
+    balance_unit: rupees
+  gap_seconds: 60

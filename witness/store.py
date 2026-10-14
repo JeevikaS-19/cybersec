@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS entries (
     timestamp TEXT,
     event_type TEXT,
     txn_id TEXT,
+    txn_time TEXT,
     from_account TEXT,
     to_account TEXT,
     amount_paise INTEGER,
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS mismatches (
     witness_hash TEXT NOT NULL,
     server_hash TEXT
 );
+CREATE TABLE IF NOT EXISTS unseeded (account TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -87,6 +89,9 @@ def init_db(db_path):
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(alerts)")}
         if "resolved" not in cols:
             conn.execute("ALTER TABLE alerts ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        if "txn_time" not in {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}:
+            conn.execute("ALTER TABLE entries ADD COLUMN txn_time TEXT")
             conn.commit()
     finally:
         conn.close()

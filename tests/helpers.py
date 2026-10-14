@@ -25,7 +25,7 @@ class Agent:
     def make(self, seq, prev_hash, timestamp, priv=None, from_bal=1_000, to_bal=2_000):
         entry = {
             "seq": seq, "timestamp": timestamp, "event_type": "transaction",
-            "txn_id": f"txn-{seq:05d}", "from_account": "acc-1", "to_account": "acc-2",
+            "txn_id": f"txn-{seq:05d}", "txn_time": timestamp, "from_account": "acc-1", "to_account": "acc-2",
             "amount_paise": 100, "from_balance_paise": from_bal, "to_balance_paise": to_bal,
             "prev_hash": prev_hash, "key_id": self.key_id,
         }

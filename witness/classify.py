@@ -10,6 +10,7 @@ _BY_REASON = {
     "unknown_key_id": "forged",
     "chain_break": "entry_inserted",
     "non_monotonic_timestamp": "backdated",
+    "malformed_entry": "forged",
 }
 
 

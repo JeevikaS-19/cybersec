@@ -1,7 +1,15 @@
-"""Agent: turns new bank transactions into signed, chained entries and sends them to the witness.
+"""Agent: turns a platform's transactions into signed, chained entries and sends them to the witness.
 
-No balance logic here. The witness does the checking.
+Where the transactions come from is config/platform.yaml (agent/source.py). No balance logic here beyond
+answering the witness's questions; the witness does the checking.
 """
+
+import sys
+from pathlib import Path
+
+if __name__ == "__main__" and not __package__:
+    # Run as `python agent/agent.py`: put the repo root first, or `agent` would resolve to this file.
+    sys.path[0] = str(Path(__file__).resolve().parents[1])
 
 import base64
 import json
@@ -9,10 +17,13 @@ import os
 import sqlite3
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 import requests
+import yaml
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
+from agent import source as platform_source
 from layers.common import events as layer_events
 from layers.common.config import get as cfg
 from layers.l3_quarantine import quarantine as l3
@@ -25,10 +36,51 @@ from shared import (
     verify_signature,
 )
 
-WITNESS_URL = os.environ.get("WITNESS_URL", "http://127.0.0.1:8000")
-BANK_DB_PATH = os.environ.get("BANK_DB_PATH", "bank.db")
+REPO = Path(__file__).resolve().parents[1]
+
+
+def load_platform():
+    path = Path(os.environ.get("COC_PLATFORM_CONFIG") or REPO / "config" / "platform.yaml")
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except OSError:
+        cfg = {}
+    src = dict(cfg.get("source") or {})
+    src.setdefault("kind", "sqlite")
+    src.setdefault("path", "bank.db")
+    src.setdefault("transactions", {"table": "transactions", "columns": {
+        "row_id": "id", "txn_id": "txn_id", "time": "timestamp", "from_account": "from_account",
+        "to_account": "to_account", "amount": "amount_paise", "from_balance": "from_balance_paise",
+        "to_balance": "to_balance_paise"}})
+    src.setdefault("accounts", {"table": "accounts", "id": "account_id", "balance": "balance_paise"})
+    if src["kind"] == "sqlite" and os.environ.get("BANK_DB_PATH"):
+        src["path"] = os.environ["BANK_DB_PATH"]
+    if os.environ.get("COC_DB_DSN"):
+        src["dsn"] = os.environ["COC_DB_DSN"]
+    elif str(src.get("dsn", "")).startswith("env:"):
+        src["dsn"] = os.environ.get(src["dsn"][4:], "")
+    return {
+        "platform_id": os.environ.get("PLATFORM_ID") or cfg.get("platform_id", "log-server-1"),
+        "witness_url": os.environ.get("WITNESS_URL") or cfg.get("witness_url", "http://127.0.0.1:8000"),
+        "source": src,
+    }
+
+
+PLATFORM = load_platform()
+WITNESS_URL = PLATFORM["witness_url"]
+PLATFORM_ID = PLATFORM["platform_id"]
 AGENT_DB_PATH = os.environ.get("AGENT_DB_PATH", "agent_state.db")
-PLATFORM_ID = os.environ.get("PLATFORM_ID", "log-server-1")
+GAP_SECONDS = float(PLATFORM["source"].get("gap_seconds", 60))
+MAX_GAPS = 1000
+_source = None
+
+
+def source():
+    global _source
+    if _source is None:
+        _source = platform_source.build(PLATFORM["source"])
+    return _source
+
 HEARTBEAT_SECONDS = cfg("layer2", "heartbeat_seconds", 5.0, "HEARTBEAT_SECONDS")
 CHALLENGE_SECONDS = cfg("layer2", "challenge_poll_seconds", 2.0, "CHALLENGE_POLL")
 TIMEOUT = 5
@@ -43,6 +95,7 @@ CREATE TABLE IF NOT EXISTS entries (
     sent INTEGER NOT NULL DEFAULT 0,
     accepted INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS sealed_rows (row_id INTEGER PRIMARY KEY, seq INTEGER NOT NULL);
 """
 
 
@@ -99,42 +152,65 @@ def last_accepted_entry(conn):
     return json.loads(row[0]) if row else None
 
 
-def sync_bank(conn, priv):
-    if not os.path.exists(BANK_DB_PATH):
-        return
-    key_id = meta_get(conn, "key_id")
-    bank = sqlite3.connect(BANK_DB_PATH)
-    try:
-        last_txn = int(meta_get(conn, "last_txn_id") or 0)
-        rows = bank.execute(
-            "SELECT id, txn_id, timestamp, from_account, to_account, amount_paise, "
-            "from_balance_paise, to_balance_paise FROM transactions WHERE id > ? ORDER BY id LIMIT ?",
-            (last_txn, SEND_BATCH),
-        ).fetchall()
-    finally:
-        bank.close()
+def seal(conn, priv, row):
+    """Turn one platform row into the next signed, chained entry. Written atomically with its row id."""
+    prev = last_local_entry(conn)
+    seq = prev["seq"] + 1 if prev else 1
+    stamp = now_iso()
+    if prev and stamp < prev["timestamp"]:
+        stamp = prev["timestamp"]  # sealing time never goes backwards, even if the clock does
+    entry = {
+        "seq": seq,
+        "timestamp": stamp,
+        "event_type": "transaction",
+        "txn_id": row["txn_id"],
+        "txn_time": row["txn_time"],
+        "from_account": row["from_account"],
+        "to_account": row["to_account"],
+        "amount_paise": row["amount_paise"],
+        "from_balance_paise": row["from_balance_paise"],
+        "to_balance_paise": row["to_balance_paise"],
+        "prev_hash": prev["hash"] if prev else GENESIS_PREV_HASH,
+        "key_id": meta_get(conn, "key_id"),
+    }
+    entry["hash"] = hash_entry(entry)
+    entry["signature"] = sign_payload(priv, {k: v for k, v in entry.items() if k != "signature"})
+    with conn:
+        conn.execute("INSERT INTO entries (seq, body) VALUES (?, ?)", (seq, json.dumps(entry)))
+        conn.execute("INSERT INTO sealed_rows (row_id, seq) VALUES (?, ?)", (row["row_id"], seq))
 
-    for row in rows:
-        prev = last_local_entry(conn)
-        seq = prev["seq"] + 1 if prev else 1
-        entry = {
-            "seq": seq,
-            "timestamp": row[2],
-            "event_type": "transaction",
-            "txn_id": row[1],
-            "from_account": row[3],
-            "to_account": row[4],
-            "amount_paise": row[5],
-            "from_balance_paise": row[6],
-            "to_balance_paise": row[7],
-            "prev_hash": prev["hash"] if prev else GENESIS_PREV_HASH,
-            "key_id": key_id,
-        }
-        entry["hash"] = hash_entry(entry)
-        entry["signature"] = sign_payload(priv, {k: v for k, v in entry.items() if k != "signature"})
-        with conn:
-            conn.execute("INSERT INTO entries (seq, body) VALUES (?, ?)", (seq, json.dumps(entry)))
-            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ("last_txn_id", str(row[0])))
+
+def sync_bank(conn, priv):
+    """Seal new platform rows. Rows can commit out of id order, so skipped ids are re-checked for a while."""
+    try:
+        src = source()
+        last = int(meta_get(conn, "last_row_id") or 0)
+        gaps = json.loads(meta_get(conn, "gaps") or "{}")
+        rows = src.new_rows(last, SEND_BATCH)
+        late = src.rows_by_ids([int(k) for k in gaps]) if gaps else []
+    except (sqlite3.Error, OSError, ImportError) as exc:
+        print(f"platform source unavailable: {exc.__class__.__name__}: {exc}")
+        return
+    except Exception as exc:  # noqa: BLE001 - e.g. psycopg.OperationalError: retry next loop
+        print(f"platform source error: {exc.__class__.__name__}: {exc}")
+        return
+    now = time.time()
+    expected = last + 1
+    for r in rows:
+        for missing in range(expected, r["row_id"]):
+            if len(gaps) < MAX_GAPS:
+                gaps.setdefault(str(missing), now)
+        expected = r["row_id"] + 1
+    already = {row_id for (row_id,) in conn.execute("SELECT row_id FROM sealed_rows WHERE row_id >= ?",
+                                                    (min([r["row_id"] for r in rows + late], default=0),))}
+    for r in late + rows:
+        gaps.pop(str(r["row_id"]), None)
+        if r["row_id"] not in already:
+            seal(conn, priv, r)
+            already.add(r["row_id"])
+    gaps = {k: t for k, t in gaps.items() if now - t < GAP_SECONDS}  # rolled-back ids never appear
+    meta_set(conn, "last_row_id", str(max(last, rows[-1]["row_id"] if rows else last)))
+    meta_set(conn, "gaps", json.dumps(gaps))
 
 
 def send_pending(conn):
@@ -176,48 +252,33 @@ def send_heartbeat(priv):
     requests.post(f"{WITNESS_URL}/heartbeat", json=body, timeout=TIMEOUT).raise_for_status()
 
 
-def bank_balance_at(account, txn_id):
-    # Bank balance as of txn_id: current balance minus the effect of later transfers.
-    bank = sqlite3.connect(BANK_DB_PATH)
-    try:
-        row = bank.execute("SELECT balance_paise FROM accounts WHERE account_id = ?", (account,)).fetchone()
-        at = bank.execute("SELECT id FROM transactions WHERE txn_id = ?", (txn_id,)).fetchone()
-        if row is None or at is None:
-            return None
-        later = bank.execute(
-            "SELECT from_account, to_account, amount_paise FROM transactions WHERE id > ?", (at[0],)
-        ).fetchall()
-    finally:
-        bank.close()
-    balance = row[0]
-    for src, dst, amount in later:
-        if src == account:
-            balance += amount
-        if dst == account:
-            balance -= amount
-    return balance
-
-
-RECORD_FIELDS = ("txn_id", "timestamp", "from_account", "to_account", "amount_paise",
+RECORD_FIELDS = ("txn_id", "txn_time", "from_account", "to_account", "amount_paise",
                  "from_balance_paise", "to_balance_paise")
 
 
+def balance_for_witness(conn, account):
+    """The platform's balance for `account` as of the last entry the witness accepted."""
+    accepted = {r for (r,) in conn.execute(
+        "SELECT s.row_id FROM sealed_rows s JOIN entries e ON e.seq = s.seq WHERE e.accepted = 1")}
+    top = max(accepted, default=0)
+    pending = [r for (r,) in conn.execute(
+        "SELECT s.row_id FROM sealed_rows s JOIN entries e ON e.seq = s.seq WHERE e.accepted = 0 AND s.row_id < ?", (top,))]
+    gaps = [int(k) for k in json.loads(meta_get(conn, "gaps") or "{}")]
+    return source().balance_as_of(account, top, pending + gaps, accepted)
+
+
 def server_records(conn, seqs):
-    # Record #seq as the bank holds it now, rebuilt from the bank's own row (None if the row is gone).
+    """Record #seq as the platform holds it now, rebuilt from its own row (None if the row is gone)."""
     txn_ids = {}
     for seq in seqs:
         row = conn.execute("SELECT body FROM entries WHERE seq = ?", (seq,)).fetchone()
         txn_ids[seq] = json.loads(row[0])["txn_id"] if row else None
-    bank = sqlite3.connect(BANK_DB_PATH)
-    try:
-        out = []
-        for seq in seqs:
-            row = bank.execute(f"SELECT {', '.join(RECORD_FIELDS)} FROM transactions WHERE txn_id = ?",
-                               (txn_ids[seq],)).fetchone() if txn_ids[seq] else None
-            out.append({"seq": seq, "record": dict(zip(RECORD_FIELDS, row, strict=True)) if row else None})
-        return out
-    finally:
-        bank.close()
+    rows = source().rows_by_txn_ids(list(txn_ids.values()))
+    out = []
+    for seq in seqs:
+        r = rows.get(txn_ids[seq])
+        out.append({"seq": seq, "record": {f: r[f] for f in RECORD_FIELDS} if r else None})
+    return out
 
 
 def answer_challenge(conn, priv):
@@ -235,7 +296,7 @@ def answer_challenge(conn, priv):
             "last_seq": last_seq,
         }
     elif challenge["type"] == "state" and last:
-        balance = bank_balance_at(challenge["account"], last["txn_id"])
+        balance = balance_for_witness(conn, challenge["account"])
         if balance is None:
             return
         payload = {

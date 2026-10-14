@@ -125,7 +125,7 @@ def test_swapped_stored_rows_are_entries_reordered(witness):
     assert not any(k == "entry_deleted" for k, _ in kinds)  # a swap is not a deletion
 
 
-RECORD_FIELDS = ("txn_id", "timestamp", "from_account", "to_account", "amount_paise",
+RECORD_FIELDS = ("txn_id", "txn_time", "from_account", "to_account", "amount_paise",
                  "from_balance_paise", "to_balance_paise")
 
 

@@ -12,7 +12,7 @@ from witness.classify import for_rejection
 from witness.store import add_alert, get_state, log_activity, set_state
 
 ENTRY_FIELDS = (
-    "seq", "timestamp", "event_type", "txn_id", "from_account", "to_account",
+    "seq", "timestamp", "event_type", "txn_id", "txn_time", "from_account", "to_account",
     "amount_paise", "from_balance_paise", "to_balance_paise", "prev_hash", "key_id", "hash",
 )
 SILENCE_SECONDS = cfg("layer2", "silence_seconds", 15.0, "SILENCE_SECONDS")
@@ -23,7 +23,7 @@ RECORD_SHARE = cfg("layer2", "record_share", 0.4, "RECORD_SHARE")
 A_KINDS = {
     "sequence_gap", "chain_break", "bad_signature", "unknown_key_id", "entry_edited",
     "entry_deleted", "entries_reordered", "entry_replayed", "late_entry", "challenge_mismatch",
-    "bad_challenge_signature", "record_mismatch",
+    "bad_challenge_signature", "record_mismatch", "malformed_entry",
 }
 B_KINDS = {"non_monotonic_timestamp", "silence", "missed_challenge", "bad_heartbeat", "replayed_heartbeat"}
 C_KINDS = {"balance_misreported", "db_edited_without_log"}
@@ -44,6 +44,8 @@ def _last_accepted(conn):
     ).fetchone()
 
 def _reject_reason(conn, entry, last):
+    if any(f not in entry for f in ENTRY_FIELDS) or set(entry) - set(ENTRY_FIELDS) - {"signature"}:
+        return "malformed_entry"  # every field is sealed; nothing may be missing or extra
     pub = _public_key(conn, entry.get("key_id"))
     if pub is None:
         return "unknown_key_id"
@@ -68,17 +70,34 @@ def _resolve(conn, kinds):
     with conn:
         conn.execute(f"UPDATE alerts SET resolved = 1 WHERE resolved = 0 AND kind IN ({marks})", tuple(kinds))
 
+EXTERNAL = "external"
+
+
 def _replay_balances(conn, entry, now_ts):
     # Check C: the witness keeps its own balances and compares the reported ones.
-    # Opening balance is inferred from the first entry seen per account (trust on first use).
+    # Opening balance: from the first entry that reports one (trust on first use), or, for platforms that
+    # don't store balances, from the first state challenge on that account (see seed_balance).
     amount = entry["amount_paise"]
     for account, reported, delta in (
         (entry["from_account"], entry["from_balance_paise"], -amount),
         (entry["to_account"], entry["to_balance_paise"], amount),
     ):
+        if account == EXTERNAL:
+            continue  # money from or to outside the platform: nothing to replay
         row = conn.execute("SELECT balance_paise FROM balances WHERE account = ?", (account,)).fetchone()
-        before = row["balance_paise"] if row else reported - delta
+        if row is None and reported is None:
+            with conn:
+                conn.execute("INSERT OR IGNORE INTO unseeded (account) VALUES (?)", (account,))
+            continue
+        if row is None:
+            before = reported - delta
+        else:
+            before = row["balance_paise"]
         expected = before + delta
+        if reported is None:
+            with conn:
+                conn.execute("UPDATE balances SET balance_paise = ? WHERE account = ?", (expected, account))
+            continue
         if reported != expected:
             offset = reported - expected
             add_alert(conn, "balance_misreported", f"{account}:{offset}", "balance_misreported",
@@ -169,7 +188,8 @@ def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
     if pending is None:
         pending = records.due_sweep(conn, now_ts)
         if pending is None and random.random() < CHALLENGE_CHANCE:
-            accounts = [r["account"] for r in conn.execute("SELECT account FROM balances ORDER BY account")]
+            accounts = [r["account"] for r in conn.execute(
+                "SELECT account FROM balances UNION SELECT account FROM unseeded ORDER BY account")]
             r = random.random()
             if state_allowed and accounts and r < STATE_SHARE:
                 pending = {"type": "state", "account": random.choice(accounts)}
@@ -229,6 +249,8 @@ def answer_challenge(conn, body, now_ts):
     if pending["type"] == "state":
         account = body.get("account")
         row = conn.execute("SELECT balance_paise FROM balances WHERE account = ?", (account,)).fetchone()
+        if row is None and conn.execute("SELECT 1 FROM unseeded WHERE account = ?", (account,)).fetchone():
+            return seed_balance(conn, pending, account, body.get("balance_paise"), now_ts)
         if row is None:
             return {"status": "mismatch"}
         reported, replay = body.get("balance_paise"), row["balance_paise"]
@@ -248,6 +270,18 @@ def answer_challenge(conn, body, now_ts):
     _resolve(conn, ["missed_challenge"])
     log_activity(conn, "challenge_ok", f"{pending['id']} hash at seq {last_seq}", now_ts)
     return {"status": "ok"}
+
+def seed_balance(conn, pending, account, reported, now_ts):
+    """Platform without stored balances: the first state answer becomes the witness's starting point."""
+    if not isinstance(reported, int):
+        return {"status": "mismatch"}
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO balances (account, balance_paise) VALUES (?, ?)", (account, reported))
+        conn.execute("DELETE FROM unseeded WHERE account = ?", (account,))
+    _resolve(conn, ["missed_challenge"])
+    log_activity(conn, "challenge_ok", f"{pending['id']} state {account} = {reported} (starting balance)", now_ts)
+    return {"status": "ok"}
+
 
 def challenge_check(conn, now_ts):
     pending = get_state(conn, "challenge")

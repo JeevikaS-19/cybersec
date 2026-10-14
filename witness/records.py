@@ -12,7 +12,7 @@ from layers.common.config import get as cfg
 from shared import hash_entry
 from witness.store import add_alert, get_state, log_activity, set_state
 
-RECORD_FIELDS = ("txn_id", "timestamp", "from_account", "to_account", "amount_paise",
+RECORD_FIELDS = ("txn_id", "txn_time", "from_account", "to_account", "amount_paise",
                  "from_balance_paise", "to_balance_paise")
 SWEEP_SECONDS = cfg("layer2", "sweep_seconds", 15.0, "SWEEP_SECONDS")
 SWEEP_BATCH = cfg("layer2", "sweep_batch", 200, "SWEEP_BATCH")

@@ -53,14 +53,18 @@ Witness stores `key_id -> public_key` per `platform_id`. Unknown `key_id` anywhe
 // request
 {
   "seq": 42, "timestamp": "2026-10-14T08:45:00Z", "event_type": "transaction",
-  "txn_id": "txn-00042", "from_account": "acc-1", "to_account": "acc-2",
+  "txn_id": "txn-00042", "txn_time": "2026-10-14 08:44:59", "from_account": "acc-1", "to_account": "acc-2",
   "amount_paise": 150000, "from_balance_paise": 4850000, "to_balance_paise": 2150000,
   "prev_hash": "base64...", "key_id": "agent-key-0", "hash": "base64...", "signature": "base64..."
 }
 // response
 { "status": "accepted" }
-{ "status": "rejected", "reason": "chain_break" | "bad_signature" | "sequence_gap" | "non_monotonic_timestamp" | "unknown_key_id" }
+{ "status": "rejected", "reason": "chain_break" | "bad_signature" | "sequence_gap" | "non_monotonic_timestamp" | "unknown_key_id" | "malformed_entry" }
 ```
+- `timestamp` = when the agent sealed the entry (never goes backwards). `txn_time` = the platform's own time for the transaction, kept as the platform wrote it (rows can commit out of time order, so it is not used for the monotonic check).
+- `from_account` / `to_account`: `"external"` when money comes from or goes to outside the platform (deposit, withdrawal). `from_balance_paise` / `to_balance_paise` may be `null` for platforms that don't store balances; Check C then seeds each account's balance from its first state challenge and replays from there.
+- Every field above is required and nothing extra is allowed (`malformed_entry`, tamper type `forged`).
+- An identical resend of the latest accepted entry (reply lost mid-send) is accepted again without a new row.
 - Validated against `last_good_seq` / `last_good_hash` (accepted entries only). A rejected entry is stored and raises exactly one alert; it never becomes the reference, so one attack never cascades.
 - `non_monotonic_timestamp` = earlier than the last accepted entry. Not "close to now": queued retries arrive late and must not alert.
 
@@ -94,7 +98,7 @@ Every 5 s. Counts only if the signature verifies and the timestamp is later than
 { "challenge": { "id": "c-103", "type": "record", "seq": 42 } }
 { "challenge": { "id": "c-104", "type": "sweep", "seqs": [1, 2, 3] } }
 ```
-`record` / `sweep`: the agent rebuilds each record from the bank's own row as it is **now** (`txn_id`, `timestamp`, `from_account`, `to_account`, `amount_paise`, `from_balance_paise`, `to_balance_paise`; `null` if the row is gone). The witness compares field by field with its sealed copy. A rolling sweep (`SWEEP_SECONDS`, default 15, batches of `SWEEP_BATCH`) covers every record; the first mismatch triggers a full sweep. Mismatch = `record_mismatch` alert (Check A), `entry_edited` or `entry_deleted`, listed at `GET /mismatches`.
+`record` / `sweep`: the agent rebuilds each record from the bank's own row as it is **now** (`txn_id`, `txn_time`, `from_account`, `to_account`, `amount_paise`, `from_balance_paise`, `to_balance_paise`; `null` if the row is gone). The witness compares field by field with its sealed copy. A rolling sweep (`SWEEP_SECONDS`, default 15, batches of `SWEEP_BATCH`) covers every record; the first mismatch triggers a full sweep. Mismatch = `record_mismatch` alert (Check A), `entry_edited` or `entry_deleted`, listed at `GET /mismatches`.
 Polled every 2 s. Issued at random times.
 
 ### `POST /challenge/response`

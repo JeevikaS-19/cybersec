@@ -22,7 +22,7 @@ class Ledger:
         self.seq += 1
         entry = {
             "seq": self.seq, "timestamp": ts(self.seq), "event_type": "transaction",
-            "txn_id": f"txn-{self.seq:05d}", "from_account": src, "to_account": dst,
+            "txn_id": f"txn-{self.seq:05d}", "txn_time": ts(self.seq), "from_account": src, "to_account": dst,
             "amount_paise": amount,
             "from_balance_paise": self.balances[src] if lie_from is None else lie_from,
             "to_balance_paise": self.balances[dst] if lie_to is None else lie_to,

@@ -42,3 +42,11 @@
 - Unlock = 2 of 3 key-holder approvals on the auditor view → witness-signed command for that quarantine id. Shamir is the production path.
 - Routes: `/quarantine/report|approve|poll` replace `/breakglass/*`.
 - Agent keeps sealing locally while the network is cut.
+
+## Platform adapter (P1)
+- `config/platform.yaml` + `agent/source.py`: the agent latches onto any SQLite/PostgreSQL bank by mapping table/column names and units (paise or DECIMAL rupees). Example for the team's bank: `config/platform.team-bank.yaml` (read-only DB user, DSN from env).
+- Entries gain `txn_time` (platform time); `timestamp` is now the sealing time, so out-of-order commits never look backdated. Record checks compare `txn_time`.
+- Rows committing out of id order: skipped ids are re-checked for `gap_seconds`; rolled-back ids are dropped. A `sealed_rows` table prevents double-sealing.
+- Deposits/withdrawals: missing side = `"external"`. Platforms without stored balances: Check C seeds each account from its first state challenge.
+- State challenges read balance + unseen rows from one database snapshot (REPEATABLE READ), so a commit mid-question can't cause a false alarm.
+- Verified: busy PostgreSQL 16 bank (4 concurrent writers, 27 rollbacks) -> 152/152 rows verified, zero false alarms; row edit and balance edit caught within 5 s.

@@ -1,0 +1,25 @@
+# Which platform the agent latches onto. The platform's own code never changes.
+# Env vars override: PLATFORM_ID, WITNESS_URL, BANK_DB_PATH (sqlite path), COC_DB_DSN (postgres).
+platform_id: log-server-1
+witness_url: http://127.0.0.1:8000
+source:
+  kind: sqlite                     # sqlite | postgres
+  path: bank.db
+  transactions:
+    table: transactions
+    columns:                       # platform column names; txn_id and balances are optional
+      row_id: id                   # increasing integer id
+      txn_id: txn_id
+      time: timestamp
+      from_account: from_account   # NULL = money from outside (deposit) -> "external"
+      to_account: to_account       # NULL = money leaving (withdrawal)   -> "external"
+      amount: amount_paise
+      from_balance: from_balance_paise
+      to_balance: to_balance_paise
+    amount_unit: paise             # paise (integer) | rupees (DECIMAL with 2 decimals)
+  accounts:
+    table: accounts
+    id: account_id
+    balance: balance_paise
+    balance_unit: paise
+  gap_seconds: 60                  # a skipped row id is re-checked this long (rows can commit out of order)
