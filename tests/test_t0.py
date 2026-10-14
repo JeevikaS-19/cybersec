@@ -25,7 +25,8 @@ def test_t0_clean_run_has_zero_alerts(tmp_path):
     url = f"http://127.0.0.1:{port}"
     env = dict(os.environ, PYTHONPATH=str(REPO), WITNESS_URL=url, CHALLENGE_CHANCE="1.0",
                WITNESS_DB_PATH=str(tmp_path / "w.db"), BANK_DB_PATH=str(tmp_path / "bank.db"),
-               AGENT_DB_PATH=str(tmp_path / "agent.db"))
+               AGENT_DB_PATH=str(tmp_path / "agent.db"), COC_SPOOL=str(tmp_path / "spool"),
+               COC_EVIDENCE_DIR=str(tmp_path / "vault"))
     log = open(tmp_path / "procs.log", "w")  # noqa: SIM115 (held open across child processes)
     procs = []
 
