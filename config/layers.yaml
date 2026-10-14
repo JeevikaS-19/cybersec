@@ -1,0 +1,10 @@
+layers:
+  1: true
+  2: true
+  3: true
+
+checks:
+  A: true
+  B: true
+  C: true
+  classifier: true

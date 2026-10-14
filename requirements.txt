@@ -1,0 +1,7 @@
+cryptography==50.0.2
+fastapi==0.115.12
+pytest==9.1.1
+PyYAML==6.0.3
+requests==2.33.1
+ruff==0.17.0
+uvicorn==0.34.0

@@ -1,0 +1,99 @@
+from shared import canonical_encode, generate_keypair, hash_entry
+from tests.helpers import Agent, ts
+from witness import checks
+from witness.store import connect
+
+
+def _alerts(db):
+    conn = connect(db)
+    try:
+        return [(r["kind"], r["ref"], r["tamper_type"]) for r in conn.execute("SELECT kind, ref, tamper_type FROM alerts ORDER BY id")]
+    finally:
+        conn.close()
+
+
+def _run(db, sql=None):
+    conn = connect(db)
+    try:
+        if sql:
+            with conn:
+                conn.execute(sql)
+        checks.self_check(conn, checks.now())
+        checks.self_check(conn, checks.now())
+    finally:
+        conn.close()
+
+
+def test_t1a_same_entry_same_bytes_and_hash():
+    entry = {"seq": 1, "timestamp": ts(1), "event_type": "transaction", "txn_id": "txn-00001",
+             "from_account": "acc-1", "to_account": "acc-2", "amount_paise": 100,
+             "from_balance_paise": 1000, "to_balance_paise": 2000, "prev_hash": "x", "key_id": "agent-key-0"}
+    entry["hash"] = hash_entry(entry)
+    again = dict(entry)
+    assert canonical_encode(entry) == canonical_encode(again)
+    assert hash_entry(entry) == hash_entry(again) == entry["hash"]
+
+
+def test_t1b_edited_stored_entry_flags_exactly_once(witness):
+    a = Agent(witness.url)
+    for _ in range(3):
+        assert a.send(a.next_entry())["status"] == "accepted"
+    _run(witness.db, "UPDATE entries SET amount_paise = amount_paise + 1 WHERE seq = 2")
+    assert _alerts(witness.db) == [("entry_edited", "2", "entry_edited")]
+
+
+def test_t1c_deleted_middle_entry_flags_sequence_gap(witness):
+    a = Agent(witness.url)
+    for _ in range(3):
+        a.send(a.next_entry())
+    _run(witness.db, "DELETE FROM entries WHERE seq = 2")
+    assert _alerts(witness.db) == [("entry_deleted", "3", "entry_deleted")]
+
+
+def test_t1d_swapped_entries_are_sequence_error(witness):
+    a = Agent(witness.url)
+    first = a.next_entry()
+    second = a.next_entry()
+    third = a.next_entry()
+    assert a.send(first)["status"] == "accepted"
+    assert a.send(third) == {"status": "rejected", "reason": "sequence_gap"}
+    assert a.send(second)["status"] == "accepted"
+    assert ("sequence_gap", "3", "entry_deleted") in _alerts(witness.db)
+
+
+def test_t1d_wrong_prev_hash_is_chain_break(witness):
+    a = Agent(witness.url)
+    a.send(a.next_entry())
+    bad = a.make(2, "not-the-real-hash", ts(2))
+    assert a.send(bad) == {"status": "rejected", "reason": "chain_break"}
+    assert ("chain_break", "2", "entries_reordered") in _alerts(witness.db)
+
+
+def test_t1e_entry_signed_with_other_key_is_bad_signature(witness):
+    a = Agent(witness.url)
+    a.send(a.next_entry())
+    other, _ = generate_keypair()
+    forged = a.make(2, a.chain[0]["hash"], ts(2), priv=other)
+    assert a.send(forged) == {"status": "rejected", "reason": "bad_signature"}
+    assert _alerts(witness.db) == [("bad_signature", "2", "forged")]
+
+
+def test_t1f_replayed_entry_is_sequence_error(witness):
+    a = Agent(witness.url)
+    first = a.next_entry()
+    a.send(first)
+    assert a.send(first) == {"status": "rejected", "reason": "sequence_gap"}
+    assert _alerts(witness.db) == [("sequence_gap", "1", "entry_replayed")]
+
+
+def test_t1g_one_bad_entry_does_not_cascade(witness):
+    a = Agent(witness.url)
+    a.send(a.next_entry())
+    other, _ = generate_keypair()
+    bad = a.make(2, a.chain[0]["hash"], ts(2), priv=other)
+    assert a.send(bad)["status"] == "rejected"
+    for _ in range(5):
+        assert a.send(a.next_entry())["status"] == "accepted"
+    assert _alerts(witness.db) == [("bad_signature", "2", "forged")]
+    _run(witness.db)
+    assert _alerts(witness.db) == [("bad_signature", "2", "forged")]
