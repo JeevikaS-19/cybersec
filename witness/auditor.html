@@ -5,178 +5,306 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Witness · Auditor</title>
 <style>
-:root{--bg:#0b0f14;--panel:#121820;--line:#1f2a36;--text:#dce4ee;--muted:#7d8b9c;--ok:#3ecf8e;--ok-bg:#0f2a1f;--bad:#ff5d5d;--bad-bg:#341517;--warn:#f5b041;--warn-bg:#33270e;--acc:#6aa8ff;
---mono:ui-monospace,"SFMono-Regular",Consolas,monospace;--sans:system-ui,-apple-system,"Segoe UI",sans-serif}
+/* Layout per MD_FILES/ui_design.md: main panel + three layer cards on the right, heartbeat monitor along the bottom. */
+:root{
+  --bg:#0a0e13;--panel:#111821;--panel2:#16202b;--line:#223041;--text:#e3eaf2;--muted:#8394a8;
+  --green:#34d399;--green-bg:#0f2c22;--red:#ff5c5c;--red-bg:#3a1416;--grey:#5b6878;--grey-bg:#1a222c;--amber:#fbbf24;--blue:#6aa8ff;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;--sans:"Segoe UI",system-ui,-apple-system,sans-serif;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);padding:16px}
-header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
-h1{font-size:18px;margin:0;letter-spacing:.02em}
-h1 small{color:var(--muted);font-weight:400;margin-left:8px}
-h2{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
-.badge{font:700 13px var(--mono);padding:6px 12px;border-radius:6px;letter-spacing:.08em}
-.badge.normal{background:var(--ok-bg);color:var(--ok)}
-.badge.alert{background:var(--bad-bg);color:var(--bad);animation:blink 1.2s infinite}
-.badge.frozen,.badge.quarantined{background:var(--warn-bg);color:var(--warn)}
-.badge.down{background:#222;color:var(--muted)}
-@keyframes blink{50%{opacity:.55}}
-@media (prefers-reduced-motion:reduce){.badge.alert,.pulse.beat{animation:none}}
-.grid{display:grid;gap:12px;grid-template-columns:repeat(12,1fr)}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
-.span3{grid-column:span 3}.span4{grid-column:span 4}.span5{grid-column:span 5}.span7{grid-column:span 7}.span8{grid-column:span 8}.span12{grid-column:span 12}
-@media (max-width:900px){.span3,.span4,.span5,.span7,.span8{grid-column:span 12}}
-.check{display:flex;flex-direction:column;gap:4px}
-.check .letter{font:800 30px var(--mono)}
-.check .name{font-weight:600}
-.check .q{color:var(--muted);font-size:12px}
-.check.green .letter{color:var(--ok)}.check.red .letter{color:var(--bad)}
-.check .st{font:700 12px var(--mono);margin-top:6px}
-.check.green .st{color:var(--ok)}.check.red .st{color:var(--bad)}
-.layers{display:flex;gap:8px;flex-wrap:wrap}
-.chip{font:600 12px var(--mono);padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
-.chip.on{color:var(--ok);border-color:#1d4a35}.chip.tripped{color:var(--bad);border-color:#5a2226;background:var(--bad-bg)}
-.chip.frozen,.chip.quarantined{color:var(--warn);border-color:#5a4416}
-.hb{display:flex;align-items:center;gap:14px}
-.pulse{width:16px;height:16px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(62,207,142,.6)}
-.pulse.beat{animation:beat .9s ease-out}
-.pulse.dead{background:var(--bad)}
-@keyframes beat{0%{box-shadow:0 0 0 0 rgba(62,207,142,.7)}100%{box-shadow:0 0 0 14px rgba(62,207,142,0)}}
-.big{font:700 26px var(--mono);font-variant-numeric:tabular-nums}
-.muted{color:var(--muted)}
-.bars{display:flex;align-items:flex-end;gap:3px;height:40px;margin-top:12px}
-.bars span{flex:1;background:#1f3b2f;border-radius:2px;min-height:3px}
-.bars span.late{background:var(--warn)}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-top:10px;font-size:13px}
-.kv b{font-family:var(--mono);font-weight:500}
-.feed{list-style:none;margin:0;padding:0;font:12.5px/1.6 var(--mono);max-height:260px;overflow:auto}
-.feed li{display:flex;gap:10px;padding:2px 0;border-bottom:1px dashed var(--line);min-width:0}
-.feed time{color:var(--muted);flex:none}
-.feed .k{flex:none;width:118px}
-.feed .d{overflow-wrap:anywhere;color:#b7c3d1}
-.k.heartbeat,.k.challenge_ok{color:var(--ok)}.k.challenge_issued{color:var(--acc)}
-.k.challenge_failed,.k.challenge_missed,.k.heartbeat_rejected{color:var(--bad)}
-.tablewrap{overflow-x:auto;max-height:340px;overflow-y:auto}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);position:sticky;top:0;background:var(--panel)}
-td.t{font-family:var(--mono);color:var(--muted);white-space:nowrap}
-.tt{font:600 12px var(--mono);padding:2px 8px;border-radius:999px;background:var(--bad-bg);color:var(--bad);white-space:nowrap}
-.tt.l1{background:#2a1f3d;color:#c39bff}
-.tt.res{background:#1a222c;color:var(--muted)}
-tr.new{animation:flash 2s ease-out}
-@keyframes flash{0%{background:#4a1d20}100%{background:transparent}}
-pre.diff{margin:6px 0 0;padding:8px;background:#0a0e13;border:1px solid var(--line);border-radius:6px;font:12px/1.5 var(--mono);overflow-x:auto;white-space:pre}
-pre.diff .add{color:var(--ok)}pre.diff .del{color:var(--bad)}
-.empty{color:var(--muted);font-style:italic;padding:8px 0}
-footer{margin-top:14px;color:var(--muted);font-size:12px}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 var(--sans);overflow:hidden}
+.app{height:100%;display:grid;gap:12px;padding:12px 16px;
+  grid-template-columns:minmax(0,1fr) 320px;grid-template-rows:auto minmax(0,1fr) minmax(0,1fr) 25vh;
+  grid-template-areas:"top top" "main l1" "main l2" "mon l3"}
+.top{grid-area:top;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.top h1{margin:0;font-size:20px;letter-spacing:.02em}
+.top h1 span{color:var(--muted);font-weight:400}
+.conn{font:700 15px var(--mono);padding:6px 14px;border-radius:8px;background:var(--grey-bg);color:var(--muted)}
+.conn.connected{background:var(--green-bg);color:var(--green)}
+.conn.lost,.conn.quarantined{background:var(--red-bg);color:var(--red)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-width:0;min-height:0}
+.main{grid-area:main;padding:22px 26px;overflow:auto}
+.card{padding:16px 18px;cursor:pointer;display:flex;flex-direction:column;gap:6px;border-width:2px;text-align:left;font:inherit;color:inherit}
+.card:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+.card .lbl{font:600 12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.card .nm{font-size:20px;font-weight:700}
+.card .st{font:700 15px var(--mono);margin-top:auto}
+.card .when{color:var(--muted);font-size:13px;font-family:var(--mono)}
+.card.idle{border-color:var(--line)}.card.idle .st{color:var(--grey)}
+.card.passed{border-color:#1d5a42}.card.passed .st{color:var(--green)}
+.card.caught{border-color:var(--red);background:linear-gradient(180deg,var(--red-bg),var(--panel) 70%)}.card.caught .st{color:var(--red)}
+.card.active{box-shadow:inset 0 0 0 1px var(--text)}
+#c1{grid-area:l1}#c2{grid-area:l2}#c3{grid-area:l3}
+.mon{grid-area:mon;padding:10px 14px;display:flex;flex-direction:column}
+.mon .hd{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font:600 12px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.mon .legend{letter-spacing:0;text-transform:none;font-weight:400}
+.mon .legend b{font-weight:700}
+.mon canvas{flex:1;width:100%;min-height:0;display:block}
+h2{margin:0 0 4px;font-size:30px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 20px;font-size:17px}
+.big{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:10px}
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:16px}
+.stat .k{color:var(--muted);font-size:14px}
+.stat .v{font:700 30px var(--mono);margin-top:4px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.stat .v.ok{color:var(--green)}.stat .v.bad{color:var(--red)}
+table{width:100%;border-collapse:collapse;font-size:16px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 12px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+td.m{font-family:var(--mono);white-space:nowrap}
+tr.hit td{background:var(--red-bg);color:#ffd7d7}
+tr.hit td:first-child{box-shadow:inset 4px 0 0 var(--red)}
+.rule{margin-top:14px;padding:12px 14px;border-radius:8px;background:var(--red-bg);color:#ffd7d7;font-size:17px}
+pre.diff{margin:12px 0 0;padding:12px;background:#070a0e;border:1px solid var(--line);border-radius:8px;font:14px/1.5 var(--mono);overflow-x:auto}
+pre.diff .add{color:var(--green)}pre.diff .del{color:var(--red)}
+.rec-head{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:baseline}
+.rec-head .t{color:var(--muted);font-family:var(--mono)}
+.cmp{display:grid;grid-template-columns:150px minmax(0,1fr) minmax(0,1fr);margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.cmp>div{padding:10px 14px;border-bottom:1px solid var(--line);font:18px var(--mono);overflow-wrap:anywhere}
+.cmp .h{font:600 12px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--panel2)}
+.cmp .f{color:var(--muted)}
+.cmp .bad{color:var(--red);font-weight:700;background:var(--red-bg)}
+.hash{margin-top:8px;color:var(--muted);font:12px var(--mono);display:grid;grid-template-columns:150px minmax(0,1fr) minmax(0,1fr);gap:0 14px;padding:0 14px;overflow-wrap:anywhere}
+.more{margin-top:18px}
+.more li{font-family:var(--mono);margin:4px 0}
+.alist li{margin:6px 0}
+.tt{font:700 13px var(--mono);padding:2px 9px;border-radius:999px;background:var(--red-bg);color:var(--red)}
+.quar{font-size:28px;font-weight:800;color:var(--red);margin:0 0 18px}
+.ev{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.ev{grid-template-columns:1fr}}
+.holders td{font-size:18px}
+.pill{font:700 13px var(--mono);padding:3px 10px;border-radius:999px}
+.pill.pending{background:var(--grey-bg);color:var(--muted)}.pill.approved{background:var(--green-bg);color:var(--green)}
+button.ap{font:600 15px var(--sans);padding:7px 16px;border-radius:8px;border:1px solid var(--green);background:transparent;color:var(--green);cursor:pointer}
+button.ap:disabled{opacity:.35;cursor:default}
+.need{margin-top:10px;color:var(--muted);font-size:17px}
+.empty{color:var(--muted);font-style:italic}
+.feed{list-style:none;padding:0;margin:0;font:16px/1.9 var(--mono)}.feed .m{color:var(--muted)}.okc{color:var(--green);font-weight:700}.badc{color:var(--red);font-weight:700}
+.card .ds{color:var(--muted);font-size:14px}
+@media (max-width:900px){body{overflow:auto}.app{height:auto;grid-template-columns:1fr;grid-template-rows:auto;grid-template-areas:"top" "l1" "l2" "l3" "main" "mon"}.main{min-height:60vh}.mon{height:220px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-<header>
-  <h1>Chain of Custody · Witness<small>auditor view</small></h1>
-  <span class="badge down" id="state">CONNECTING</span>
-</header>
-
-<div class="grid">
-  <div class="panel span3 check" id="cA"><h2>Layer 2 · Check A</h2><span class="letter">A</span><span class="name">Sealed chain</span><span class="q">Was anything changed?</span><span class="st">…</span></div>
-  <div class="panel span3 check" id="cB"><h2>Layer 2 · Check B</h2><span class="letter">B</span><span class="name">Outside witness</span><span class="q">Is the agent alive and honest?</span><span class="st">…</span></div>
-  <div class="panel span3 check" id="cC"><h2>Layer 2 · Check C</h2><span class="letter">C</span><span class="name">Truth check</span><span class="q">Does the log match the bank?</span><span class="st">…</span></div>
-  <div class="panel span3"><h2>Layers</h2><div class="layers" id="layers"></div>
-    <div class="kv"><span class="muted">Entries sealed</span><b id="seq">0</b><span class="muted">Open alerts</span><b id="open">0</b></div></div>
-
-  <div class="panel span5"><h2>Heartbeat · from the log server</h2>
-    <div class="hb"><div class="pulse" id="pulse"></div><div><div class="big" id="age">–</div><div class="muted">since last signed heartbeat (alarm at 15 s)</div></div></div>
-    <div class="bars" id="bars" aria-label="Recent heartbeat intervals"></div>
-    <div class="kv"><span class="muted">Last heartbeat</span><b id="lastts">–</b><span class="muted">Interval</span><b>every 5 s, Ed25519-signed</b></div>
-  </div>
-  <div class="panel span7"><h2>Liveness feed · heartbeats and random challenges</h2><ul class="feed" id="feed"><li class="empty">Waiting for the agent…</li></ul></div>
-
-  <div class="panel span12"><h2>Alerts · what kind of tampering</h2>
-    <div class="tablewrap"><table><thead><tr><th>Time</th><th>Tamper type</th><th>Signal</th><th>Ref</th><th>Detail</th></tr></thead><tbody id="alerts"><tr><td colspan="5" class="empty">No alerts. Every check is passing.</td></tr></tbody></table></div>
-  </div>
-
-  <div class="panel span12"><h2>Layer events · tripwire and response</h2><div id="events"><div class="empty">No layer events yet.</div></div></div>
+<div class="app">
+  <div class="top"><h1>Chain of Custody · Witness <span>auditor view</span></h1><span class="conn" id="conn">CONNECTING</span></div>
+  <section class="panel main" id="main" aria-live="polite"></section>
+  <button class="panel card idle" id="c1" data-layer="1"><span class="lbl">Layer 1</span><span class="nm">Custom commands</span><span class="ds">Guarded commands need the team's profile-id</span><span class="when"></span><span class="st">IDLE</span></button>
+  <button class="panel card idle" id="c2" data-layer="2"><span class="lbl">Layer 2</span><span class="nm">Heartbeat &amp; checksum</span><span class="ds">Sealed records, random checks, truth check</span><span class="when"></span><span class="st">IDLE</span></button>
+  <button class="panel card idle" id="c3" data-layer="3"><span class="lbl">Layer 3</span><span class="nm">Quarantine</span><span class="ds">Network cut → server locks itself down</span><span class="when"></span><span class="st">IDLE</span></button>
+  <section class="panel mon"><div class="hd"><span>Live heartbeat monitor</span>
+    <span class="legend"><b style="color:var(--blue)">▲</b> witness asks · <b style="color:var(--green)">▼</b> matches · <b style="color:var(--red)">▼</b> tampered · <b style="color:var(--amber)">?</b> no answer · <b style="color:var(--muted)">•</b> heartbeat</span></div>
+    <canvas id="mon" aria-label="Heartbeat and random check monitor"></canvas></section>
 </div>
-<footer>Reads <code>/status</code>, <code>/alerts</code>, <code>/activity</code>, <code>/timeline</code> once a second. The witness holds public keys only; it can verify seals but never make them.</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const hhmmss = (t) => new Date(t * 1000).toLocaleTimeString([], { hour12: false });
-let lastActivity = 0, feed = [], beats = [], lastBeatId = 0, seenAlerts = new Set(), firstLoad = true, lastHbRecv = null;
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour12: false });
+const isoClock = (s) => { const d = new Date(s); return isNaN(d) ? esc(s) : d.toLocaleTimeString([], { hour12: false }); };
+const L2_KINDS = new Set(["sequence_gap", "chain_break", "bad_signature", "unknown_key_id", "entry_edited", "entry_deleted",
+  "entries_reordered", "entry_replayed", "late_entry", "challenge_mismatch", "bad_challenge_signature", "record_mismatch",
+  "non_monotonic_timestamp", "silence", "missed_challenge", "bad_heartbeat", "replayed_heartbeat", "balance_misreported", "db_edited_without_log"]);
+const NAMES = { amount_paise: "amount", from_account: "from", to_account: "to", from_balance_paise: "from balance",
+  to_balance_paise: "to balance", txn_id: "txn id", timestamp: "time" };
+const SHOWN = ["txn_id", "timestamp", "from_account", "to_account", "amount_paise", "from_balance_paise", "to_balance_paise"];
+const money = (f, v) => (f.endsWith("paise") && Number.isInteger(v) ? (v / 100).toFixed(2) : v ?? "—");
 
-async function j(path) { const r = await fetch(path, { cache: "no-store" }); if (!r.ok) throw new Error(r.status); return r.json(); }
+let S = null, alerts = [], events = [], mism = [], acts = [], lastAct = 0, offset = 0;
+let view = 0, pinned = false, prevCaught = { 1: 0, 2: 0, 3: 0 };
 
-function renderStatus(s, alerts) {
-  const st = s.state || "normal";
-  $("state").className = "badge " + st;
-  $("state").textContent = st.toUpperCase();
-  for (const c of ["A", "B", "C"]) {
-    const v = s.checks[c];
-    $("c" + c).className = "panel span3 check " + v;
-    $("c" + c).querySelector(".st").textContent = v === "green" ? "GREEN · passing" : "RED · tampering detected";
+async function j(p) { const r = await fetch(p, { cache: "no-store" }); if (!r.ok) throw new Error(r.status); return r.json(); }
+
+function layerState() {
+  const l1 = alerts.filter((a) => a.kind === "layer1_tripwire");
+  const l2 = alerts.filter((a) => L2_KINDS.has(a.kind) && !a.resolved);
+  const q = S && S.quarantine;
+  const on = (n) => S && S.layers[n] !== "off";
+  return {
+    1: { st: !on(1) ? "idle" : l1.length ? "caught" : "passed", n: l1.length, t: l1.length ? l1[l1.length - 1].time : null },
+    2: { st: !on(2) ? "idle" : l2.length ? "caught" : S && S.connection === "waiting" ? "idle" : "passed", n: l2.length, t: l2.length ? l2[l2.length - 1].time : null },
+    3: { st: !on(3) ? "idle" : q && q.active ? "caught" : "passed", n: q && q.active ? 1 : 0, t: q && q.since },
+  };
+}
+
+function renderCards(ls) {
+  for (const n of [1, 2, 3]) {
+    const c = $("c" + n), s = ls[n];
+    c.className = `panel card ${s.st}${view === n ? " active" : ""}`;
+    c.querySelector(".st").textContent = s.st === "caught" ? (n === 3 ? "QUARANTINED" : `CAUGHT · ${s.n}`) : s.st === "passed" ? "PASSED" : "IDLE";
+    c.querySelector(".when").textContent = s.st === "caught" && s.t ? "fired " + clock(s.t) : "";
+    if (s.n > prevCaught[n] && !pinned) view = n;  // auto-switch to the layer that just caught something
+    prevCaught[n] = s.n;
   }
-  const names = { 1: "L1 tripwire", 2: "L2 heartbeat + checksum", 3: "L3 quarantine" };
-  $("layers").innerHTML = Object.entries(s.layers).map(([n, v]) => `<span class="chip ${esc(v)}">${names[n]} · ${esc(v)}</span>`).join("");
-  $("seq").textContent = s.last_entry_seq;
-  $("open").textContent = alerts.filter((a) => !a.resolved).length;
-  $("lastts").textContent = s.last_seen || "–";
 }
 
-function renderActivity(rows) {
-  for (const r of rows) {
-    lastActivity = Math.max(lastActivity, r.id);
-    feed.unshift(r);
-    if (r.kind === "heartbeat") { beats.push(r.time); lastHbRecv = r.time; if (r.id > lastBeatId) { lastBeatId = r.id; beat(); } }
+function screen0() {
+  const s = S, lv = s.last_verified;
+  return `<h2>${esc(s.platform_id || "Waiting for server")}</h2>
+  <p class="sub">${s.connection === "connected" ? "Connected · every record sealed, checked and verified" : s.connection === "lost" ? "No contact with the server" : "Waiting for the first heartbeat"}</p>
+  <div class="big">
+    <div class="stat"><div class="k">Status</div><div class="v ${s.connection === "connected" ? "ok" : "bad"}">${esc(s.connection.toUpperCase())}</div></div>
+    <div class="stat"><div class="k">Last verified record</div><div class="v">${lv ? "#" + lv.seq : "—"}</div><div class="k">${lv ? isoClock(lv.time) : ""}</div></div>
+    <div class="stat"><div class="k">Records verified</div><div class="v">${s.records_verified}</div></div>
+    <div class="stat"><div class="k">Last full check</div><div class="v">${s.last_sweep ? clock(s.last_sweep) : "—"}</div><div class="k">rolling sweep of every record</div></div>
+  </div>
+  <h3 style="margin:26px 0 8px;color:var(--muted);font-size:14px;letter-spacing:.1em;text-transform:uppercase">Latest random checks</h3>
+  <ul class="feed">${acts.filter((a) => a.kind.startsWith("challenge_") && a.kind !== "challenge_issued").slice(-6).reverse()
+    .map((a) => `<li><span class="m">${clock(a.time)}</span> <span class="${a.kind === "challenge_ok" ? "okc" : "badc"}">${a.kind === "challenge_ok" ? "✓" : "✗"}</span> ${esc(a.detail.replace(/^c-[0-9a-f]+ /, ""))}</li>`).join("") || '<li class="empty">Waiting for the first check…</li>'}</ul>`;
+}
+
+function screen1() {
+  const rows = events.filter((e) => e.layer === 1);
+  if (!rows.length) return `<h2>Layer 1 · Custom commands</h2><p class="sub">No commands seen yet. The team uses <code>&lt;cmd&gt; --&lt;profile-id&gt;</code>; anything else trips.</p>`;
+  const last = [...rows].reverse().find((e) => e.state === "alert");
+  const diffEv = [...rows].reverse().find((e) => e.detail && e.detail.diff);
+  const body = rows.slice(-14).reverse().map((e) => {
+    const d = e.detail || {}, w = e.who || {};
+    return `<tr class="${e.state === "alert" ? "hit" : ""}"><td class="m">${isoClock(e.time)}</td><td>${esc(w.user || (w.uid ?? "—"))}</td><td class="m">${esc(w.src_ip || "local")}</td><td class="m">${esc(d.cmd || e.trigger)}</td><td>${esc(d.result || (e.state === "alert" ? "caught" : "logged"))}</td></tr>`;
+  }).join("");
+  const diff = diffEv ? `<pre class="diff">${esc(diffEv.detail.diff).split("\n").map((l) => l.startsWith("+") && !l.startsWith("+++") ? `<span class="add">${l}</span>` : l.startsWith("-") && !l.startsWith("---") ? `<span class="del">${l}</span>` : l).join("\n")}</pre>` : "";
+  return `<h2>Layer 1 · Custom commands</h2><p class="sub">Command log from the server</p>
+  <table><thead><tr><th>Time</th><th>User</th><th>Source IP</th><th>Command</th><th>Result</th></tr></thead><tbody>${body}</tbody></table>
+  ${last ? `<div class="rule">Rule broken: ${esc(last.detail.rule || "Command not in the allowed command set")}.</div>` : ""}
+  ${diffEv ? `<p class="sub" style="margin:16px 0 0">What the intruder tried to change (they edited a decoy; the real log is untouched):</p>${diff}` : ""}`;
+}
+
+function screen2() {
+  const others = alerts.filter((a) => L2_KINDS.has(a.kind) && a.kind !== "record_mismatch" && !a.resolved);
+  const otherList = others.length ? `<div class="more"><h3>Other Layer 2 alerts</h3><ul class="alist">${others.map((a) => `<li><span class="tt">${esc(a.tamper_type || a.kind)}</span> ${esc(a.detail)} <span class="empty">${clock(a.time)}</span></li>`).join("")}</ul></div>` : "";
+  if (!mism.length) {
+    return `<h2>Layer 2 · Heartbeat &amp; checksum</h2><p class="sub">${others.length ? "Tampering detected" : "Every record checked so far matches the sealed copy"}</p>${otherList}`;
   }
-  feed = feed.slice(0, 80); beats = beats.slice(-30);
-  if (!feed.length) return;
-  $("feed").innerHTML = feed.map((r) => `<li><time>${hhmmss(r.time)}</time><span class="k ${esc(r.kind)}">${esc(r.kind.replace("_", " "))}</span><span class="d">${esc(r.detail)}</span></li>`).join("");
-  const gaps = beats.slice(1).map((t, i) => t - beats[i]);
-  $("bars").innerHTML = gaps.map((g) => `<span class="${g > 7 ? "late" : ""}" style="height:${Math.min(100, (g / 15) * 100)}%" title="${g.toFixed(1)} s"></span>`).join("");
+  const m = mism[0], w = m.witness_copy || {}, f = m.server_copy || {}, changed = new Set(m.fields);
+  const rows = m.server_copy === null
+    ? `<div class="f">record</div><div>${esc(w.txn_id)} …</div><div class="bad">missing on server</div>`
+    : SHOWN.map((k) => `<div class="f">${NAMES[k] || k}</div><div>${esc(money(k, w[k]))}</div><div class="${changed.has(k) ? "bad" : ""}">${esc(money(k, f[k]))}${changed.has(k) ? " ←" : ""}</div>`).join("");
+  const rest = mism.slice(1);
+  return `<div class="rec-head"><h2>Record #${m.seq}</h2><span class="t">Caught by ${esc(m.caught_by.replace(/ \(c-[0-9a-f]+\)/, ""))} at ${clock(m.caught_time)}</span></div>
+  <div class="cmp"><div class="h">Field</div><div class="h">Expected (witness copy)</div><div class="h">Found on server</div>${rows}</div>
+  <div class="hash"><span>hash</span><span>${esc((m.witness_hash || "").slice(0, 12))}…</span><span>${m.server_hash ? esc(m.server_hash.slice(0, 12)) + "…" : "—"}</span></div>
+  ${rest.length ? `<div class="more"><h3>Also tampered (found in the sweep)</h3><ul>${rest.map((x) => `<li>#${x.seq} · ${esc(x.fields.map((k) => NAMES[k] || k).join(", "))}: ${x.server_copy ? x.fields.map((k) => esc(money(k, x.witness_copy[k])) + " → " + esc(money(k, x.server_copy[k]))).join(", ") : "missing on server"}</li>`).join("")}</ul></div>` : ""}
+  ${otherList}`;
 }
 
-function beat() { const p = $("pulse"); p.classList.remove("beat"); void p.offsetWidth; p.classList.add("beat"); }
-
-function tick() {
-  if (lastHbRecv === null) return;
-  const age = Date.now() / 1000 - lastHbRecv;
-  $("age").textContent = age.toFixed(1) + " s";
-  $("pulse").classList.toggle("dead", age > 15);
+function screen3() {
+  const q = S.quarantine;
+  if (!q || !q.active) {
+    return `<h2>Layer 3 · Quarantine</h2><p class="sub">Not triggered. If the server loses contact with the witness for ${q && q.after ? q.after : 45} s, it quarantines itself: all users logged out, evidence sealed locally, 2 of 3 key holders needed to unlock.</p>`;
+  }
+  const lv = S.last_verified;
+  const holders = (q.holders || [{ name: "SOC lead" }, { name: "Auditor" }, { name: "Compliance officer" }]).map((h, i) =>
+    `<tr><td>${esc(h.name)}</td><td><span class="pill ${h.approved ? "approved" : "pending"}">${h.approved ? "Approved" : "Pending"}</span></td><td><button class="ap" data-holder="${i}" ${h.approved || !q.can_approve ? "disabled" : ""}>Approve</button></td></tr>`).join("");
+  return `<p class="quar">Banking server has quarantined itself. All users logged out.</p>
+  <p class="sub">Reported by the witness: no contact since ${q.since ? clock(q.since) : "—"}. The server locked itself down; the witness could not, the network is cut.</p>
+  <div class="ev">
+    <div class="stat"><div class="k">Verified and stored on witness</div><div class="v ok">#1 – #${lv ? lv.seq : 0}</div><div class="k">${lv ? "up to " + isoClock(lv.time) : ""}</div></div>
+    <div class="stat"><div class="k">Unverified since cut</div><div class="v bad">${q.unverified == null ? "unknown" : q.unverified + " records"}</div><div class="k">${q.unverified == null ? "held on the server until the network is back" : "received, being verified"}</div></div>
+  </div>
+  <h3 style="margin-top:22px">Key holders</h3>
+  <table class="holders"><tbody>${holders}</tbody></table>
+  <p class="need">2 of 3 approvals needed to unlock.</p>`;
 }
 
-function renderAlerts(alerts) {
-  if (!alerts.length) return;
-  const rows = alerts.slice().reverse().map((a) => {
-    const key = a.kind + "|" + a.ref, isNew = !firstLoad && !seenAlerts.has(key);
-    seenAlerts.add(key);
-    const cls = a.kind.startsWith("layer1") ? "tt l1" : a.resolved ? "tt res" : "tt";
-    const label = a.tamper_type || (a.kind.startsWith("layer1") ? "layer 1 tripwire" : a.kind);
-    return `<tr class="${isNew ? "new" : ""}"><td class="t">${hhmmss(a.time)}</td><td><span class="${cls}">${esc(label)}${a.resolved ? " · cleared" : ""}</span></td><td>${esc(a.kind)}</td><td class="t">${esc(a.ref)}</td><td>${esc(a.detail)}</td></tr>`;
-  });
-  $("alerts").innerHTML = rows.join("");
+function renderMain() {
+  if (!S) return;
+  const html = view === 1 ? screen1() : view === 2 ? screen2() : view === 3 ? screen3() : screen0();
+  if ($("main").dataset.html !== html) { $("main").innerHTML = html; $("main").dataset.html = html; }
 }
 
-function renderEvents(events) {
-  if (!events.length) return;
-  $("events").innerHTML = '<div class="tablewrap"><table><thead><tr><th>Time</th><th>Trigger</th><th>Who</th><th>What</th></tr></thead><tbody>' +
-    events.slice().reverse().map((e) => {
-      const d = e.detail || {}, w = e.who || {};
-      const who = [w.auid != null ? "auid " + w.auid : "", w.uid != null ? "uid " + w.uid : "", w.src_ip || ""].filter(Boolean).join(" · ") || "–";
-      const diff = d.diff ? `<pre class="diff">${esc(d.diff).split("\n").map((l) => l.startsWith("+") && !l.startsWith("+++") ? `<span class="add">${l}</span>` : l.startsWith("-") && !l.startsWith("---") ? `<span class="del">${l}</span>` : l).join("\n")}</pre>` : "";
-      return `<tr><td class="t">${esc(new Date(e.time).toLocaleTimeString([], { hour12: false }))}</td><td><span class="tt ${e.layer === 1 ? "l1" : ""}">L${e.layer} · ${esc(e.trigger)}</span>${e.state === "normal" ? ' <span class="muted">(logged)</span>' : ""}</td><td class="t">${esc(who)}</td><td>${esc(d.cmd || "")}${d.mode ? ` <span class="muted">[${esc(d.mode)}]</span>` : ""}${diff}</td></tr>`;
-    }).join("") + "</tbody></table></div>";
+$("main").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.ap");
+  if (!b) return;
+  b.disabled = true;
+  try { await fetch("/quarantine/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ holder: Number(b.dataset.holder) }) }); } catch (err) { b.disabled = false; }
+});
+for (const n of [1, 2, 3]) $("c" + n).addEventListener("click", () => { view = view === n ? 0 : n; pinned = view !== 0; renderAll(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "0") { view = 0; pinned = false; renderAll(); } });
+
+// Heartbeat monitor: 90 s scrolling window. Up spike = witness asks (labelled #N), down spike = answer.
+const WINDOW = 60;
+function label(detail) {
+  const m = /record #(\d+)/.exec(detail) || /sweep #(\d+)-#(\d+)/.exec(detail);
+  if (m && m[2]) return `#${m[1]}–${m[2]}`;
+  if (m) return "#" + m[1];
+  const st = /state (\S+)/.exec(detail);
+  return st ? st[1] : "#latest";
+}
+function drawMonitor() {
+  const cv = $("mon"), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const now = Date.now() / 1000 + offset, mid = H * 0.55, amp = Math.min(H * 0.38, 70), x = (t) => W - ((now - t) / WINDOW) * W;
+  const css = getComputedStyle(document.documentElement), col = (v) => css.getPropertyValue(v).trim();
+  g.strokeStyle = col("--line"); g.lineWidth = 1;
+  for (let s = 0; s <= WINDOW; s += 15) { const xx = x(now - s); g.beginPath(); g.moveTo(xx, 8); g.lineTo(xx, H - 4); g.stroke(); }
+  const recent = acts.filter((a) => a.time > now - WINDOW - 5);
+  const beats = recent.filter((a) => a.kind === "heartbeat");
+  const lastBeat = S && S.heartbeat_age != null ? S.server_time - S.heartbeat_age : null;
+  const dead = !lastBeat || now - lastBeat > 15;
+  // baseline: green while heartbeats arrive, flat red once they stop
+  g.lineWidth = 2; g.strokeStyle = dead ? col("--red") : col("--green"); g.setLineDash(dead ? [6, 6] : []);
+  g.beginPath(); g.moveTo(0, mid);
+  const spikes = recent.filter((a) => a.kind.startsWith("challenge_")).sort((a, b) => a.time - b.time);
+  const askX = {};
+  for (const a of spikes) {
+    const id = a.detail.split(" ")[0];
+    if (a.kind === "challenge_issued") { a.x = x(a.time); askX[id] = a.x; }
+    else a.x = Math.max(x(a.time), (askX[id] ?? -1e9) + 14);
+  }
+  for (const a of spikes) {
+    const xx = a.x; if (xx < 0) continue;
+    const up = a.kind === "challenge_issued";
+    g.lineTo(xx - 4, mid); g.lineTo(xx, up ? mid - amp : mid + amp * 0.8); g.lineTo(xx + 4, mid);
+  }
+  g.lineTo(W, mid); g.stroke(); g.setLineDash([]);
+  // colour the spikes and label the asks
+  g.font = "600 12px " + col("--mono"); g.textAlign = "center";
+  const answered = new Set(spikes.filter((a) => a.kind !== "challenge_issued").map((a) => a.detail.split(" ")[0]));
+  let lastLabel = 1e9;
+  for (const a of [...spikes].reverse()) {
+    const xx = a.x; if (xx < 0) continue;
+    const id = a.detail.split(" ")[0];
+    if (a.kind === "challenge_issued") {
+      g.fillStyle = col("--blue");
+      if (lastLabel - xx > 46) { g.fillText(label(a.detail), xx, mid - amp - 6); lastLabel = xx; }
+      g.beginPath(); g.arc(xx, mid - amp, 3, 0, 7); g.fill();
+      if (!answered.has(id) && now - a.time > 6) { g.fillStyle = col("--amber"); g.fillText("?", xx + 12, mid - amp * 0.4); }
+    } else {
+      const c = a.kind === "challenge_ok" ? col("--green") : col("--red");
+      g.strokeStyle = c; g.lineWidth = 3; g.beginPath(); g.moveTo(xx - 4, mid); g.lineTo(xx, mid + amp * 0.8); g.lineTo(xx + 4, mid); g.stroke();
+      if (a.kind !== "challenge_ok") { g.fillStyle = c; g.fillText("✗", xx, mid + amp * 0.8 + 16); }
+    }
+  }
+  g.fillStyle = col("--muted");
+  for (const b of beats) { const xx = x(b.time); if (xx >= 0) { g.beginPath(); g.arc(xx, mid, 2.5, 0, 7); g.fill(); } }
+  g.textAlign = "left"; g.font = "12px " + col("--mono");
+  g.fillText(dead ? "NO HEARTBEAT" : `heartbeat ${S ? (S.heartbeat_age ?? 0).toFixed(0) : 0}s ago`, 6, H - 8);
+  g.textAlign = "right"; g.fillText(`−${WINDOW}s … now`, W - 6, H - 8);
+}
+
+function renderAll() {
+  if (!S) return;
+  const conn = S.quarantine && S.quarantine.active ? "quarantined" : S.connection;
+  $("conn").className = "conn " + conn; $("conn").textContent = conn.toUpperCase();
+  renderCards(layerState()); renderMain();
 }
 
 async function poll() {
   try {
-    const [s, a, act, tl] = await Promise.all([j("/status"), j("/alerts"), j("/activity?since_id=" + lastActivity), j("/timeline")]);
-    renderStatus(s, a.alerts); renderActivity(act.activity); renderAlerts(a.alerts); renderEvents(tl.events);
-    firstLoad = false;
+    const [s, a, ev, mm, act] = await Promise.all([j("/status"), j("/alerts"), j("/timeline"), j("/mismatches"), j("/activity?since_id=" + lastAct)]);
+    S = s; alerts = a.alerts; events = ev.events; mism = mm.mismatches;
+    offset = s.server_time - Date.now() / 1000;
+    for (const r of act.activity) { acts.push(r); lastAct = Math.max(lastAct, r.id); }
+    acts = acts.filter((r) => r.time > s.server_time - 200);
+    renderAll();
   } catch (e) {
-    $("state").className = "badge down"; $("state").textContent = "WITNESS UNREACHABLE";
+    $("conn").className = "conn lost"; $("conn").textContent = "WITNESS UNREACHABLE";
   }
 }
-poll(); setInterval(poll, 1000); setInterval(tick, 200);
+poll(); setInterval(poll, 1000);
+(function loop() { drawMonitor(); requestAnimationFrame(loop); })();
 </script>
 </body>
 </html>

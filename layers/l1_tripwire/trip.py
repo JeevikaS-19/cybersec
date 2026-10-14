@@ -97,7 +97,8 @@ def deceive_editor(name, args, target):
         diff = "".join(difflib.unified_diff(original.splitlines(True), attempted.splitlines(True),
                                             str(target_path), f"{target_path} (attempted)"))
         emit(name, f"deception:{name}", args, {"mode": "deception", "target": str(target_path),
-                                               "diff": diff[:DIFF_LIMIT], "diff_truncated": len(diff) > DIFF_LIMIT})
+                                               "diff": diff[:DIFF_LIMIT], "diff_truncated": len(diff) > DIFF_LIMIT,
+                                               "result": "edit captured, real file untouched"})
     return 0
 
 

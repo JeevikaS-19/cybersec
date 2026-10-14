@@ -298,6 +298,8 @@ def status(conn, layers):
         "records_verified": conn.execute("SELECT COUNT(*) FROM entries WHERE accepted = 1").fetchone()[0],
         "last_verified": {"seq": last["seq"], "time": last["timestamp"]} if last else None,
         "last_sweep": get_state(conn, "last_sweep"),
+        "server_time": now(),
+        "quarantine": get_state(conn, "quarantine"),  # filled by Layer 3
     }
 
 def list_alerts(conn):
