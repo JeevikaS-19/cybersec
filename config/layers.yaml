@@ -28,6 +28,10 @@ layer1:
   file_commands: [rm, mv, cp, sed, truncate, shred, cat]    # trip inside protected_paths without the profile-id
   watch_cd: true               # cd into a protected path is reported
   profiles_file: /etc/coc/profiles   # profile-id hashes per platform (python -m layers.l1_tripwire.profiles add <platform>)
+  backstop:                    # catches bypasses of the wrappers (full path, other tools, temp-file rename)
+    enabled: true              # auditd where the kernel allows it; inotify + /proc attribution otherwise
+    watch: []                  # default: protected_paths
+    allowed_writers: []        # the platform's own processes that write there (matched in their command line)
 
 layer3:
   after_seconds: 45            # no contact with the witness for this long = quarantine

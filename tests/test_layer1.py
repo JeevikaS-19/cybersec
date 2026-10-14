@@ -160,6 +160,7 @@ def test_profile_id_authorizes_and_is_never_logged(tmp_path, monkeypatch):
     assert "bank-7f3a9c2e" not in (tmp_path / "profiles").read_text()
     assert profiles.match("bank-7f3a9c2e") == "demo-bank" and profiles.match("wrong-guess") is None
     monkeypatch.setattr(trip, "run_real", lambda name, args: 0)
+    monkeypatch.setattr(trip, "exec_real", lambda name, args: 0)
     assert trip.run("rm", ["--bank-7f3a9c2e", str(log)]) == 0
     (event,) = [json.loads(p.read_text()) for p in layer_events.pending()]
     assert event["trigger"] == "authorized:rm" and event["state"] == "normal"

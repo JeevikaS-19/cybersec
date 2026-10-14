@@ -31,5 +31,8 @@ ENV
 /usr/sbin/sshd
 python victim/bank.py >/var/log/bank/bank-stdout.log 2>&1 &
 for _ in $(seq 1 50); do [ -s "$BANK_DB_PATH" ] && break; sleep 0.2; done
+# Layer 1 backstop: root watcher for writes that bypass the wrappers.
+python -m layers.l1_tripwire.backstop init
+python -u -m layers.l1_tripwire.backstop run >/var/log/coc-backstop.log 2>&1 &
 echo "log-server ready: witness=${WITNESS_URL}"
 exec python -u agent/agent.py

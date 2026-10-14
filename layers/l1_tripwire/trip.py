@@ -107,6 +107,16 @@ def run_real(name, args):
     return subprocess.call([real, *args]) if real else 127
 
 
+def exec_real(name, args):
+    """Become the real command (same pid): the profile-id leaves the process list immediately."""
+    real = real_binary(name)
+    if not real:
+        return 127
+    if os.name == "posix":
+        os.execv(real, [name, *args])
+    return run_real(name, args)
+
+
 def run(name, args):
     cfg = settings()
     if name == "cd":
@@ -124,7 +134,13 @@ def run(name, args):
         # rest never contains the profile-id, so it is never logged or sent
         emit(name, f"authorized:{name}", rest, {"profile": platform, "targets": targets,
                                                 "result": f"allowed (profile {platform})"}, state="normal")
-        return run_real(name, rest)
+        if targets:
+            try:  # tell the root backstop this write is authorized (encrypted to its key, see backstop.py)
+                from layers.l1_tripwire import backstop
+                backstop.write_marker(args[0][2:], targets)
+            except Exception:  # noqa: BLE001, S110 - no backstop installed: nothing to tell
+                pass
+        return exec_real(name, rest)
     rule = (f"Write to protected path {targets[0]} without a profile-id" if targets and not is_editor
             else f"Editor '{name}' used without a profile-id")
     result = "blocked" if cfg["mode"] != "deception" else ("allowed (read only)" if name == "cat" else "deceived (decoy)")

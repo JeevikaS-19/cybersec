@@ -22,6 +22,8 @@ COPY config ./config
 RUN sed -e 's|^  dry_run: true.*|  dry_run: false|' \
         -e 's|^  site_down: \[\].*|  site_down: ["pkill -STOP -f victim/bank.py"]|' \
         -e 's|^  site_up: \[\].*|  site_up: ["pkill -CONT -f victim/bank.py"]|' \
+        -e 's|^    watch: \[\].*|    watch: [/var/log/bank, /var/lib/bank]|' \
+        -e 's|^    allowed_writers: \[\].*|    allowed_writers: ["victim/bank.py"]|' \
         config/layers.yaml > config/layers.container.yaml \
     && grep -q "dry_run: false" config/layers.container.yaml && grep -q "pkill -STOP" config/layers.container.yaml
 COPY docker/log-server/entrypoint.sh /entrypoint.sh
