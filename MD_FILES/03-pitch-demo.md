@@ -1,96 +1,99 @@
-# 03 · Pitch and Demo
+# 03 · Pitch and Demo (v3)
 
 Focus: **innovation, scalability, product ready, amazing pitch.**
 
-**One line:** *Chains prove a log wasn't changed. We also prove it matches reality.*
+**One line:** *Logs that prove they weren't changed, catch the intruder in the act, and lock the door behind them.*
+
+**Story in three beats:** **Detect** (Checks A, B, C) → **Respond** (Layers 1, 2, 3) → **Prove** (signed evidence bundles in a vault no one can delete from).
 
 ---
 
 ## Round 1 · 3:00 to 4:00 PM · Idea + skeleton
-We won't have the full prototype. Sell the idea and show it's real.
-
 **Slides (5 min)**
-1. **Hook:** A bank insider changes a balance at 2 a.m. and covers it up. Logs are the only evidence, and the attacker controls them.
-2. **Problem:** today's logs sit on the same machine as the attacker. Admin access = edit access.
-3. **Insight:** a log must prove itself to someone outside, and match reality.
-4. **Three layers, three questions**
-   - Sealed chain: was anything changed?
-   - Outside witness: was anything hidden?
-   - Truth check: does it match reality?
-5. **Our innovation:** the truth check. Show the attack only we catch: a direct database edit with no log entry.
+1. **Hook:** A bank insider with admin access edits a balance at 2 a.m. and covers it up. Logs are the only evidence, and the attacker controls them.
+2. **Problem:** logs sit on the same machine as the attacker. Admin access = edit access, and most tools only notice afterwards, if at all.
+3. **Detect:** Check A sealed chain (was anything changed?), Check B outside witness (is the agent still alive and honest?), Check C truth check (does the log match the bank's real state?).
+4. **Respond:** Layer 1 tripwire (intruder habits give them away), Layer 2 evidence on every failure, Layer 3 break glass (freeze everything if the admin is locked out).
+5. **Prove:** every incident becomes a signed bundle in a write-once vault; its hash goes to the witness.
 6. **Skeleton demo** (below).
-7. **Plan to Round 2 and Final:** what we'll show next.
+7. **Plan to Round 2 and Final.**
 
 **Live demo (2 min)**
-- Fake bank running, entries flowing to the witness, dashboard green.
-- Edit an entry → Layer 1 goes red, shows the exact entry.
-- If ready: kill the agent → silence alert.
-- If anything breaks: switch to dashboard fake-data mode and walk through the story.
+- `docker compose up` already running: logs streaming, Checks A to C green.
+- Attacker types `nano app.log` → **Layer 1 trips**, command blocked, event on the SOC timeline.
+- Edit a balance directly in the bank DB (A6) → **Check C red** while A and B stay green. "Every other log system just missed this."
+- If anything breaks: dashboard fake-data mode and walk through the story.
 
 ---
 
 ## Round 2 · 7:30 to 8:30 PM · It works
 **Demo (4 min)**
 1. All green.
-2. Edit an entry → Layer 1 red. "Everyone catches this."
-3. Kill the agent → Layer 2 red.
-4. **Edit the balance directly in the database** → Layer 1 and 2 stay green, **Layer 3 red**. "Every other log system just missed this."
-5. **Push a fake, correctly signed transfer** → Layer 3 red: no settlement confirmation.
+2. `nano app.log` → Layer 1 trips.
+3. Bypass with `/usr/bin/nano`, edit a record → **auditd backstop + Layer 2**: auditor view shows before / after / diff / who.
+4. Try to delete that evidence from the vault → **denied** by object lock, even with the vault admin credential.
+5. Kill the agent → Check B silence alert.
 
-**Fallback demo (if Step 8 / the feed isn't ready by the 6:30 freeze; decide by 6:30, rehearse it, never improvise live):** all green → A1 edit (Layer 1 red within 5 s via the self-check) → A4 kill agent (Layer 2 red) → A12 DB edit (Layer 3 red via the state challenge). Stop there, skip A13. Say the confirmation-feed layer is being wired in and will be in the final demo.
-
-**Then:** progress since Round 1, what's coming for the final.
+**Fallback (if auditd failed in Phase 0):** step 3 uses the inotify fallback; say so. Decide by 6:30, rehearse it, never improvise live.
 
 ---
 
 ## Final · Day 2, 10:00 AM · Product
 **Slides (7 min) + demo (4 min)**
-1. Hook
-2. Problem
-3. Three layers
-4. **Live demo** (Round 2 flow + auditor export)
-5. **Innovation:** attacks caught only by us (DB edit, fake transfer, redirected transfer)
-6. **Scalability**
-7. **Product ready**
-8. Honest limits + roadmap
-9. Who it's for
+1. Hook  2. Problem  3. Detect / Respond / Prove  4. **Live demo**  5. Innovation  6. Scalability  7. Product ready  8. Honest limits + roadmap  9. Who it's for
+
+**Live demo (follows `docs/demo_script.md`)**
+1. Normal operation: logs streaming, heartbeats green.
+2. Stolen admin creds, `nano app.log` → **Layer 1 trips**, bundle in auditor view.
+3. `/usr/bin/nano` edit → **auditd + Layer 2**, before / after / diff / who.
+4. Delete the evidence in the vault → denied by object lock.
+5. Attacker locks the admin out → **Layer 3 fires**, system FROZEN, attacker's session killed too.
+6. Two key holders enter shares in the dashboard → unlocks; every step is in the evidence trail.
+7. Show the witness has no SSH (port 22 closed).
+
+### Innovation talking points
+- **Truth check (Check C):** catches a direct DB edit with no log entry, which a hash chain alone never sees.
+- **Tripwire on habits:** the team never types `nano` on this box; an intruder always does.
+- **Break glass with 2-of-3 keys:** the attacker's lockout move freezes them out too; no single person (not even the admin) can unlock.
+- **Evidence that outlives the attacker:** write-once vault + witness-held hashes.
 
 ### Scalability talking points
-- **One agent, any platform:** the agent is a small sidecar; a platform plugs in by mapping its fields.
-- **Witness scales out:** each platform's chain is independent, so witnesses split by platform.
-- **Anchoring cost doesn't grow:** one hash per time interval, not one per entry.
-- **Reconciliation is fast:** matching by transaction ID is a direct lookup, not a search.
-- **More trust = more witnesses:** add independent witnesses run by different parties.
+- **One agent image, any platform:** a sidecar container; a platform plugs in by mapping its log fields.
+- **Witness scales out:** each platform's chain is independent.
+- **Vault is standard S3 with object lock:** swap MinIO for any S3-compatible store with compliance mode.
+- **Each layer is a config switch:** start with detection only, turn on response layers as trust grows.
 
 ### Product-ready talking points
-- **5-step onboarding:** install agent, register key, map fields, set policies, create accounts.
-- **Two users, two jobs:** SOC sees alerts live; auditor exports proof.
-- **Roles:** no one, not even admins, can edit or delete entries. Every action is itself logged.
-- **Compliance fit:** CERT-In 2022 directions (log retention), RBI cybersecurity framework, PCI DSS Requirement 10 (audit logs).
-- **Deploys as containers** (slide).
+- **One command up:** `docker compose up`.
+- **Two users, two jobs:** SOC sees the live timeline and can hit panic; auditor verifies bundles and holds an unlock share.
+- **Roles:** no one, not even admins, can edit or delete entries or vault evidence. Every action is itself logged.
+- **Compliance fit:** CERT-In 2022 directions (log retention), RBI cybersecurity framework, PCI DSS Requirement 10 (audit logs), SEC 17a-4-style write-once storage.
 
 ### Honest limits (say them, judges respect it)
-- If the attacker controls the bank **and** the settlement side, reconciliation agrees with the lie. That's two organisations.
-- **Our demo's feed is a stub**, not a real settlement network: the bank tells it about transfers over a side channel, because we don't have a real settlement partner to wire into a 24-hour build. In production the feed is run by a genuinely separate party (the real settlement network) with no channel from the platform into it at all. Say this before a judge finds it — it reads as rigor, not a weakness.
-- Genesis must happen on a clean system.
-- An attacker who steals the agent's current key can keep signing heartbeats after killing it. Silence catches a plain kill; the state challenge and the feed catch the rest.
-- Future: hardware attestation (TPM).
+- **Wrappers are bypassable** (full path, another shell). That's why they're detection only; auditd is the enforcement.
+- **Docker shares the WSL2 kernel:** Phase 0 results decide which features ran natively and which used fallbacks. Say which.
+- **An attacker with root can try to kill the break-glass controller first.** The witness sees missed heartbeats, and the vault already holds everything streamed up to that point.
+- **Network cut before a bundle is pushed:** the witness sees the silence, but that bundle is lost. Local encrypted buffer is on the roadmap.
+- **An attacker who steals the agent's key can keep signing heartbeats.** Check C and Layer 1/2 events still catch their actions.
+- **Unlock shares pass through the witness** to reconstruct the secret. In production, use a threshold scheme where no single party sees the whole secret.
+- **Genesis must happen on a clean system.** Future: hardware attestation (TPM).
 
 ---
 
 ## Judge questions to rehearse
 | Question | Answer |
 |---|---|
-| What if root changes data before it's logged? | Truth check: the settlement side never confirmed it. |
-| How is your balance check different from a hash chain? | It compares with sources the bank doesn't control. Show the DB-edit attack. |
-| What if the witness is hacked? | Signed receipts, anchors, and the feed's own copy disagree with it. |
-| What can't you catch? | Bank and settlement both compromised. |
-| **Couldn't the attacker feed your "independent" feed lies too?** | **In this demo, the feed is a stub fed over a side channel from the bank — yes, a root attacker controlling that channel could lie to it too. That's a demo simplification, not how it works in production: the real feed is a separate organisation's system (actual settlement) with no channel from the platform at all.** |
-| Why not just use blockchain? | We anchor to one, but you don't need a blockchain per entry. It's slower and costlier for the same guarantee. |
+| Can't the attacker just use `/usr/bin/nano`? | Yes, and auditd catches it by exec rule and directory watch. Wrappers are the tripwire, auditd is the lock. |
+| Isn't locking everyone out a denial of service? | It's an emergency brake for one trigger: the admin being locked out. Two of three key holders restore service in minutes, and the evidence is safe. |
+| Why not just reboot? | A reboot wipes live evidence (processes, connections) and unloads auditd rules. We capture first, then freeze. |
+| What if the attacker kills auditd or the agent? | Stopping auditd is itself an audit event, and the witness sees missed heartbeats within 15 s. |
+| What if root changes data without writing a log? | Check C: the state challenge compares the bank's real balance with our replay. |
+| What if the witness is hacked? | The vault still holds every log line and bundle under object lock; bundle hashes and the vault disagree with any rewrite. |
+| Why not just use blockchain? | Object-locked storage plus a signed hash chain gives the same tamper-evidence, faster and cheaper. |
 | How does this scale? | Scalability slide. |
 
 ## Demo rules
 - Same attack order every rehearsal.
 - One person drives, one person talks, one person runs attacks.
 - Backup screen recording ready for every round.
-- Hotspot on, laptops plugged in, notifications off.
+- Laptop plugged in, Docker Desktop already running with images built, notifications off.

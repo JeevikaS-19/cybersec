@@ -7,6 +7,11 @@ keys/
 *.key
 anchor*.txt
 receipts/
+.env
+*.env
+minio-data/
+shares/
+*.share
 # python
 __pycache__/
 *.pyc

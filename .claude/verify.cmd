@@ -20,7 +20,7 @@ if errorlevel 1 (
   echo verify: pytest not installed, tests skipped 1>&2
   goto done
 )
-python -m pytest -q -m "not slow" 1>&2 || set FAILED=1
+python -m pytest -q -m "not slow and not docker" 1>&2 || set FAILED=1
 
 :done
 rem Exit 1 = non-blocking: failures are shown to you, Claude is not forced to fix them.

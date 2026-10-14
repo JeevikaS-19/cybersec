@@ -10,3 +10,13 @@
 8. **Feed demo shortcut undercuts "settlement never confirmed it"** → named explicitly as a demo simplification in `02-flow.md` Step 8, `03-pitch-demo.md`'s honest-limits slide, and a rehearsed judge question. `07-attacks.md` notes A13/A14 must bypass the shortcut to demo the real mechanism.
 9. **pytest/ruff allowed?** → confirmed, added to the allowed list in `01-rules.md` explicitly as dev-only tools.
 10. **05 referenced attacks with no list** → `07-attacks.md` created; `05-self-tests.md`'s handover table now points to it.
+
+---
+
+## v3 switch (LAYERS_PLAN.md)
+- v3 replaces the v2 build. The v2 checks stay as a minimal base, renamed **Check A** (sealed chain), **Check B** (outside witness), **Check C** (truth check). v3 owns **Layers 1 to 3** (tripwire, hooks, break glass).
+- Setup moved from 3 laptops on a hotspot to Docker on one laptop (`log-server`, `witness`, `vault`, `dashboard`, `attacker`).
+- Antigravity still builds and Claude Code reviews; LAYERS_PLAN's "Claude Code" instructions apply to the builder.
+- Dropped to slide-only: settlement feed (old Check 3), conservation check, key rotation, signed receipts, external anchor, `/verify/compare`.
+- Rewritten: `00`, `01`, `02`, `03`, `05`, `06`, `07`. Updated: `04`, `LAYERS_PLAN.md` header and ground rules. New routes: `/events`, `/timeline`, `/breakglass/*`; `/status` now reports `checks`, `layers` and `state`.
+- Allowed libraries added: pycryptodome (Shamir), minio, pyyaml.

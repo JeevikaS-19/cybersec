@@ -13,29 +13,31 @@ Hackurity 2026 · PS-6 Chain of Custody · Firewall Crew
 ## Files in this pack
 | File | What it's for |
 |---|---|
+| `LAYERS_PLAN.md` | The v3 design: vault, Layers 1 to 3, Docker setup |
 | `01-rules.md` | How Antigravity, Claude Code and the team work together |
-| `02-flow.md` | Build order + what each piece does technically |
+| `02-flow.md` | Build order, owners, what each piece does technically |
 | `03-pitch-demo.md` | Pitch and demo for each round |
 | `04-token-saver.md` | Rules so the AI doesn't waste tokens |
-| `05-self-tests.md` | Tests we run ourselves before the red team is ready |
-| `06-api-contract.md` | Routes and request bodies between the 3 laptops |
+| `05-self-tests.md` | Tests we run ourselves |
+| `06-api-contract.md` | Routes, request bodies and signed fields between containers |
 | `07-attacks.md` | Attack scripts list, for the 3rd member |
-| `08-fixes-changelog.md`, `09-fix` | History of fixes (09 applied to 02, 03, 05, 06, 07) |
+| `08-fixes-changelog.md`, `09-fix` | History of fixes (09 is superseded by v3) |
 
 ## Before the event
 **Team**
-- [ ] All 3 have read `02-flow.md` and `06-api-contract.md`, and agree on the entry format (Step 1) and routes
-- [ ] Roles confirmed: Jeev = `shared/`, `agent/`, `witness/`, crypto · Jaganath = `victim/`, `dashboard/` · 3rd member = `feed/`, `attacks/`
+- [ ] All 3 have read `LAYERS_PLAN.md`, `02-flow.md` and `06-api-contract.md`, and agree on the entry format and routes
+- [ ] Owners confirmed (table in `02-flow.md`)
 - [ ] Confirm the rules allow feeding pre-written docs to AI tools
 - [ ] Check whether the judging rubric is published
 
-**Laptops and network**
-- [ ] Laptop A = platform + agent, Laptop B = witness + dashboard, Laptop C = feed + red team
-- [ ] Python, FastAPI, Streamlit (or plain HTML), `cryptography`, `pytest`, `ruff` installed on all 3 **before** the event (installing is not coding)
-- [ ] All 3 laptops join one phone hotspot and can reach each other (ping test)
-- [ ] Windows Firewall: allow the witness port on Laptop B (default blocks inbound). Laptop A and C need no inbound rule — they only poll out (see `06-api-contract.md`)
-- [ ] Second phone ready as backup hotspot
-- [ ] Check data balance on both phones (AI tools use hotspot data)
+**Laptop (demo machine) and Docker**
+- [ ] Docker Desktop installed, WSL2 backend on, `docker compose version` works
+- [ ] Base images pulled before the event (installing is not coding): `python:3.11-slim`, `minio/minio`, `minio/mc`, an `ubuntu`/`debian` image for `log-server` and `attacker`
+- [ ] Docker Desktop memory set to at least 4 GB
+- [ ] Quick manual check (no code): `docker run --rm --cap-add AUDIT_CONTROL --cap-add NET_ADMIN --cap-add LINUX_IMMUTABLE debian` starts, so Phase 0 has a chance
+- [ ] Python, `cryptography`, `pycryptodome`, `minio`, `pyyaml`, `pytest`, `ruff` installed locally for tests
+- [ ] Other two laptops: Antigravity and Claude Code work; they clone the repo and push branches
+- [ ] Phone hotspot (AI tools only) + backup hotspot; check data balance
 
 **AI setup**
 - [ ] `01-rules.md` and `04-token-saver.md` copied into `AGENTS.md` (Antigravity) and `CLAUDE.md` (Claude Code)
@@ -43,8 +45,8 @@ Hackurity 2026 · PS-6 Chain of Custody · Firewall Crew
 
 **Pitch**
 - [ ] Round 1 slides drafted (`03-pitch-demo.md`)
-- [ ] Architecture diagram drawn
-- [ ] Judge questions rehearsed once, including the feed-shortcut question
+- [ ] Architecture diagram drawn (5 containers, Checks A to C, Layers 1 to 3, vault)
+- [ ] Judge questions rehearsed once
 
 **Personal**
 - [ ] Prep time blocked separately from HACKFEST Round 1 (due Oct 18)

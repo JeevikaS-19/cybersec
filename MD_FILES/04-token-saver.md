@@ -3,13 +3,13 @@
 Copy into `AGENTS.md` and `CLAUDE.md` under the rules.
 
 ## Rules for the AI
-- **Read only what the step needs.** Read `02-flow.md` and `06-api-contract.md` for the current step and the files in that step's folder. Don't scan the whole repo.
+- **Read only what the step needs.** Read the current step in `02-flow.md`, the routes it uses in `06-api-contract.md`, the matching section of `LAYERS_PLAN.md`, and the files in that step's folder. Don't scan the whole repo.
 - **Don't re-read files** you already read this session unless they changed.
 - **Edit, don't rewrite.** Change only the lines that need changing. Never reprint a whole file.
 - **Short replies.** Plan: max 5 lines. Explanation: max 5 lines. Review: max 5 lines. No intros, no recaps.
 - **No extras.** No READMEs, comments on every line, docstrings, type stubs, example files or "nice to have" features unless asked.
-- **No new libraries.** Use the allowed list in `01-rules.md` (FastAPI, uvicorn, requests, cryptography, sqlite3, streamlit, pytest, ruff).
-- **Run only the tests for this step**, plus the clean-run test (fast mode) before merging.
+- **No new libraries.** Use the allowed list in `01-rules.md`.
+- **Run only the tests for this step**, plus T0 (fast mode) before merging. Don't rebuild Docker images unless a Dockerfile changed.
 - **Show only the error line** from failing output, not the full log.
 - **Ask one question instead of guessing.** A wrong guess costs more tokens to undo.
 - **Stop when the step is done.** Don't start the next one.
@@ -21,7 +21,7 @@ Copy into `AGENTS.md` and `CLAUDE.md` under the rules.
 - **New session per step.** Clear or start fresh after each step is merged so old context doesn't pile up. In Claude Code, use `/clear` between steps and `/compact` if a session gets long.
 - **Antigravity builds, Claude Code reviews.** Don't ask both to write the same thing.
 - **Stagger accounts.** Limits reset roughly every 5 hours. Don't burn both Claude Code accounts at once. Note when each one hit its limit.
-- **Save heavy reviews** for crypto and reconciliation code. UI code only gets reviewed if it's broken.
+- **Save heavy reviews** for crypto, evidence bundles, Layer 3 and reconciliation code. UI code only gets reviewed if it's broken.
 
 ## Good vs bad prompts
 | Bad | Good |

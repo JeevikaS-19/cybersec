@@ -1,154 +1,127 @@
-# 02 · Build Flow and Tech
+# 02 · Build Flow and Tech (v3)
 
-The order we build things, what each piece does, and what you should be able to explain. Routes and field names: `06-api-contract.md` (tiebreaker if anything here disagrees).
+The order we build things, what each piece does, and what you should be able to explain.
+Design: `LAYERS_PLAN.md`. Routes and fields: `06-api-contract.md` (tiebreaker if anything here disagrees).
 
-## Setup: 3 laptops, 1 hotspot
+**Naming used everywhere:**
+- **Checks** (detect, the minimal base): **Check A** sealed chain · **Check B** outside witness (heartbeat + challenges) · **Check C** truth check (balance replay + state challenge).
+- **Layers** (respond, v3): **Layer 1** command tripwire · **Layer 2** heartbeat/checksum hooks · **Layer 3** break glass.
+- **Vault + evidence bundles**: the shared piece every layer uses.
+
+## Setup: Docker on one laptop
+Docker Desktop on Windows (WSL2 backend). One `docker compose up` runs the whole demo.
 ```
-Laptop A                      Laptop B                         Laptop C
-victim/ + agent/   --HTTP-->  witness/ + dashboard/   <--HTTP--  feed/ + attacks/
-(the "bank",                  (the judge, shows                (settlement side
- attacker's machine)           SOC + auditor tabs)               + red team, mock anchor file)
-            shared/ (one copy in the repo, imported by agent/ and witness/)
+attacker  --(stolen admin creds)-->  log-server  --HTTP-->  witness  <--HTTP--  dashboard
+                                     victim/ + agent/        (API port only,     (SOC + auditor)
+                                     + layers/               no sshd)
+                                          |                                         |
+                                          +--PutObject only-->  vault (MinIO)  <--read only--+
 ```
-- Folders: `shared/`, `victim/`, `agent/`, `witness/`, `feed/`, `dashboard/`, `attacks/`, `tests/`.
-- All talk over HTTP on the hotspot. `WITNESS_URL` env var on every laptop (write the IP on a sticky note at 8:00).
-- Agent and feed **poll** the witness; only Laptop B needs an inbound firewall rule.
-- No cloud services. The external anchor is a mock: Laptop C pulls `GET /anchor/latest` and appends it to a local file.
+- Containers: `log-server`, `witness`, `vault`, `dashboard`, `attacker`. Containers reach each other by name (`http://witness:8000`).
+- `log-server` polls the witness; the witness never calls out. Only the witness API port and the dashboard port are published.
+- No cloud services. Laptop hotspot is only for AI tools.
+
+## Folders and owners (proposed, confirm at 8:00)
+| Folder | What | Owner |
+|---|---|---|
+| `shared/` | canonical encoding, hashing, signing | Jeev |
+| `agent/` | chain + sign + send, heartbeat, challenge replies (runs in log-server) | Jeev |
+| `witness/` | verify, store, Checks A to C, layer events, break-glass relay | Jeev |
+| `layers/common/` | `events.py`, `evidence.py` (bundles + vault) | Jeev |
+| `layers/l2_hooks/`, `layers/l3_breakglass/` | Layer 2 and 3 | Jeev |
+| `layers/l1_tripwire/` | wrappers, `coc-*` commands, `audit.rules`, `coc-unlock` | 3rd member |
+| `victim/` | fake bank app writing logs + SQLite (runs in log-server) | Jaganath |
+| `dashboard/` | SOC + auditor views | Jaganath |
+| `docker/` | compose file, Dockerfiles, MinIO init | Jaganath |
+| `attacks/`, `docs/demo_script.md` | attack scripts, demo | 3rd member |
+| `config/layers.yaml` | on/off switch per layer and check | Jeev |
+| `tests/` | self-tests (Claude Code writes and runs) | all |
 
 ---
 
 ## Timeline
 | Time | Build | Ready for |
 |---|---|---|
-| 8:00 to 8:30 | Step 0: setup | |
-| 8:30 to 11:00 | Steps 1 to 3 | |
-| 11:00 to 1:00 | Steps 4 to 5 | |
-| 1:00 to 2:00 | Step 6 (dashboard, real data) | |
+| 8:00 to 8:30 | Step 0 setup, Step 1 Phase 0 spike | |
+| 8:30 to 11:00 | Steps 2 to 3 (compose up, base Checks A and B) | |
+| 11:00 to 1:00 | Steps 4 to 5 (Check C, vault + evidence) | |
+| 1:00 to 2:00 | Step 6 (Layer 1 wrappers), dashboard on real data | |
 | 2:00 to 3:00 | **Freeze, rehearse** | **Round 1, 3 PM** |
-| 4:00 to 6:30 | Steps 7 to 9 | |
-| 6:30 to 7:30 | **Freeze, rehearse** (pick full or fallback demo by 6:30) | **Round 2, 7:30 PM** |
-| 8:30 PM to 2:00 AM | Steps 10 to 13 | |
-| 2:00 to 6:00 AM | Sleep in shifts, polish | |
+| 4:00 to 6:30 | Steps 7 to 8 (auditd backstop, Layer 2) | |
+| 6:30 to 7:30 | **Freeze, rehearse** | **Round 2, 7:30 PM** |
+| 8:30 PM to 2:00 AM | Steps 9 to 10 (Layer 3, dashboard additions) | |
+| 2:00 to 6:00 AM | Sleep in shifts, Step 11 demo script, polish | |
 | 6:00 to 8:00 AM | **Freeze**, full test suite, backup video | |
 | 8:00 to 10:00 AM | Rehearse twice, final slides | **Final, 10 AM** |
 
-Jaganath builds the dashboard with **fake data** from 8:30, so Round 1 already looks like a product. It switches to real data in Step 6.
+Jaganath builds the dashboard with **fake data** from 8:30, so Round 1 already looks like a product. Steps 0 to 6 alone are a working story if time runs short.
 
 ---
 
 ## Steps
 
-### Step 0 · Setup + registration (all)
-Repo, folders, `AGENTS.md`, `CLAUDE.md`, IPs noted, ping test between laptops.
+### Step 0 · Setup (all)
+Repo pulled, `docker compose version` works, base images already pulled (done before the event). Ownership table above confirmed.
 
-**Registration:** at startup, before sending anything else, the agent calls `POST /register/agent` and the feed calls `POST /register/feed`. Each gets back a `key_id`. The witness refuses entries, heartbeats and confirmations from any key it hasn't registered.
+### Step 1 · Phase 0 kernel spike (Jeev, 30 min max)
+Script inside `log-server` that checks: auditd rules (`CAP_AUDIT_CONTROL`, `CAP_AUDIT_WRITE`), fanotify (`CAP_SYS_ADMIN`), `chattr +a/+i` on the mounted log volume (`CAP_LINUX_IMMUTABLE`), iptables (`CAP_NET_ADMIN`). Write results to `docs/phase0_results.md`. Anything that fails uses its fallback (inotify, read-only remount) and goes on the honest-limits slide.
 
-### Step 1 · Entry format + canonical encoding (Jeev, `shared/`)
-**What:** one shared definition of a log entry, in `shared/`, imported by `agent/` and `witness/`. Never copied into either.
+**Explain it:** Why can only one auditd own the audit subsystem? Why mount logs as a volume?
 
-Fields: `seq`, `timestamp`, `event_type`, `txn_id`, `from_account`, `to_account`, `amount_paise`, `from_balance_paise`, `to_balance_paise`, `prev_hash`, `key_id`, `hash`, `signature`.
+### Step 2 · Docker compose skeleton (Jaganath, `docker/`)
+Five containers start with one command. `witness` image has no `openssh-server`. `vault` = MinIO with object lock, compliance mode, 1-day retention, a PutObject-only credential for log-server and a read-only auditor credential.
 
-- `hash` = SHA-256 over the canonical encoding of every field except `hash` and `signature`.
-- `signature` = Ed25519 over the canonical encoding of every field except `signature`.
-- All hashes, keys and signatures are base64.
-- `GENESIS_PREV_HASH = base64.b64encode(b"\x00" * 32)` = `"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`. The entry with `seq = 0` uses it as `prev_hash`.
+### Step 3 · Base: Checks A and B (Jeev, `shared/`, `agent/`, `witness/`)
+**Registration:** at startup the agent calls `POST /register/agent`, gets a `key_id`.
 
-**Tech:** "canonical encoding" means turning an entry into bytes the exact same way every time: keys sorted, no extra spaces, integers only. If two machines encode the same entry differently, the hash differs and you get a false alarm.
+**Entry format** (in `shared/`, imported by agent and witness, never copied): `seq`, `timestamp`, `event_type`, `txn_id`, `from_account`, `to_account`, `amount_paise`, `from_balance_paise`, `to_balance_paise`, `prev_hash`, `key_id`, `hash`, `signature`. Canonical encoding: sorted keys, no spaces, integers only. Base64 for hashes, keys, signatures. `GENESIS_PREV_HASH = base64(32 zero bytes)`.
 
-**Explain it:** Why do floats break this? Why must keys be sorted?
+**Agent:** reads each new `victim/` transaction, builds the entry, signs it, POSTs `/entries`, keeps a local SQLite copy, queues and retries with the same `seq` if sending fails. Signed heartbeat every 5 s. No balance logic.
 
-### Step 2 · Fake bank (Jaganath, `victim/`)
-**What:** SQLite with an `accounts` table (balances) and a `transactions` table. A loop that creates random transfers every second.
+**Witness:** validates each entry against the last **accepted** entry (signature, `prev_hash`, `seq`, monotonic timestamp). Rejected entries are stored and alert once, never cascade. Silence alert after 15 s with no valid heartbeat. Self-check every 5 s re-hashes stored entries (live Check A red on a direct DB edit). `GET /verify` for range checks.
 
-**Fast mode:** `--fast` (or `FAST_MODE=1`) creates transfers as fast as possible. Used only for the T0 clean-run test (10,000 transactions in minutes). Normal 1/sec pace stays for live demos.
+**Explain it:** Why can't the witness forge an entry? Why check against the last *accepted* entry?
 
-**Tech:** each transfer subtracts from one account and adds to another in the same database transaction, so money is never created or lost.
-
-**Explain it:** Where does the "real" balance live?
-
-### Step 3 · Agent: chain + sign + send (Jeev, `agent/`)
-**What:** reads each new transaction, builds an entry (including `from_balance_paise` / `to_balance_paise` as read from the bank DB), signs it, POSTs it to `/entries`. Sends a signed heartbeat every 5 seconds.
-
-**Local copy:** the agent also stores every entry it builds in its own local SQLite (`agent/`). This is the copy A3/A7 tamper with and `attacks/compare_local.py` sends to `POST /verify/compare`.
-
-**Tech:**
-- **Hash chain:** each entry stores the hash of the previous one. Changing any old entry changes its hash, which no longer matches the next entry's `prev_hash`. One edit breaks everything after it.
-- **Sequence number:** counts up by 1. A missing number = something was deleted.
-- **Ed25519 signature:** the agent signs with a private key. Anyone with the public key can check it, but only the private key can create it. The witness only ever gets the public key.
-- **No balance logic in the agent.** It reports what the bank DB says; the witness decides.
-
-**Fallback:** if sending fails, keep entries in a local queue and retry with the same `seq`.
-
-**Explain it:** Why can't the witness forge an entry?
-
-### Step 4 · Witness: verify + store + silence alert + self-check (Jeev, `witness/`)
-**What:** FastAPI server. On every entry, check against the last **accepted** entry (`last_good_seq` / `last_good_hash`):
-- `key_id` is registered (else `unknown_key_id`), signature valid
-- `prev_hash` = `last_good_hash`, `seq` = `last_good_seq + 1`
-- `timestamp` is later than the last accepted entry's timestamp (monotonic). **Not** "close to now": queued retries arrive late and must not alert.
-
-Accepted entries advance `last_good_*`. A rejected entry is stored as evidence and raises exactly one alert, but never becomes what the next entry is checked against, so one attack doesn't cascade.
-
-**Silence:** a background task checks the last valid heartbeat. A heartbeat only counts if its signature is valid and its timestamp is later than the previous heartbeat (no replays). More than 15 s without one = silence alert (agent killed or blocked).
-
-**Periodic self-check (every 5 s):** re-reads the stored **accepted** entries, recomputes each `hash` from its fields via `shared/`, and checks `prev_hash` links and `seq` continuity. A mismatch = someone edited the witness DB directly (A1, A2): Layer 1 red within 5 s, no new entry needed. One alert per broken entry, not one every 5 s.
-
-**`GET /verify?from_seq&to_seq`** exists from this step as a raw endpoint (Step 12 is just its UI). **`POST /verify/compare`** takes the agent's local entries and reports what's missing or different (T2d, A3, A7).
-
-**Explain it:** Which check catches a deleted entry? Which catches a killed agent? Why validate against the last *accepted* entry?
-
-### Step 5 · Witness: balance replay, Check 1 (Jeev, `witness/`)
-**What:** witness keeps its own dictionary `account -> balance`, updated from each accepted entry. Compares with the agent's `from_balance_paise` and `to_balance_paise`, and alerts on the specific account that's wrong.
-
-**Tech:** the witness never trusts the agent's numbers. They're claims. The witness's own replay is the truth.
+### Step 4 · Base: Check C (Jeev, `witness/`)
+Witness keeps its own `account -> balance` replay and compares with `from_balance_paise` / `to_balance_paise`. **State challenge** at random times: "what's the balance of account X and up to which seq?" The agent answers from the bank DB. Catches a direct DB edit with no log entry while Checks A and B stay green.
 
 **Explain it:** Why is a balance computed on the bank's machine useless against a root attacker?
 
-### Step 6 · Dashboard on real data (Jaganath, `dashboard/`)
-**What:** SOC tab reads from witness API (`/status`, `/alerts`): Layer 1 status, Layer 2 status, Layer 3 status, alert list with the exact entry that broke.
+### Step 5 · Vault + evidence bundles (Jeev, `layers/common/`)
+- `events.py`: one internal event format (`layer`, `trigger`, `time`, `who`, `detail`).
+- Continuous streaming: every log entry pushed to the vault as written (the "before" copy).
+- `evidence.py`: builds a bundle when anything fires (layer, trigger, who: `auid`/uid/process/exe/source IP, log snapshot + hashes, diff vs vault "before", auditd records), signs it with the agent key, pushes it to the vault, sends the bundle hash to the witness (`POST /events`).
+- `TODO` stub (do not build): local encrypted buffer for when the network is cut before a push.
 
-**Fallback:** if real data isn't ready by 2:00, demo with fake data mode and say so.
+**Explain it:** Why can't even the vault admin delete a locked object? Why send the bundle hash to the witness?
 
-**➡ Round 1 is here.**
+### Step 6 · Layer 1 wrappers (3rd member, `layers/l1_tripwire/`)
+Wrapper dir first in `PATH` (`/opt/trip/bin`): `nano`, `vi`, `vim`, `gedit`, `rm`, `mv`, `cp`, `sed`, `truncate`, `shred`, `cat` on log paths; `cd` via a shell function in the system profile. Each wrapper emits a Layer 1 event, triggers a bundle, alerts, and **blocks** the command. Team commands: `coc-view`, `coc-status`, `coc-verify`. `coc-unlock` checks a key against a stored hash and restores originals for that session only, logged.
 
-### Step 7 · State challenge, Check 2 (Jeev + Jaganath)
-**What:** witness picks a random account at a random time and asks the agent (via `GET /challenge/poll`) "what's its balance in the DB right now, and up to which seq?" Agent replies on `POST /challenge/response`. Witness compares with its replay at that seq.
+**➡ Round 1 is here** (Checks A to C + Layer 1 wrappers + vault).
 
-**Tech:** catches someone editing the database directly without any log entry. The chain stays green; this goes red. **This is our headline demo.**
+### Step 7 · Layer 1 backstop: auditd (Jeev + 3rd member)
+`audit.rules`: execve rules for the real binaries (full-path use still caught), `-p wa` watches on the log **directory** (temp-file + rename saves caught). Wrappers are detection; auditd is the real enforcement. **Fallback** if Phase 0 failed: inotify on the log dir + process lookup.
 
-**Explain it:** Why include `last_seq` in the answer?
-
-### Step 8 · Confirmation feed, Check 3 (3rd member `feed/`, Jeev wires matching)
-**What:** a separate program on Laptop C with its **own key**. For every real transfer, it sends its own signed confirmation to `POST /feed/confirmations`. Witness matches by `txn_id`, accounts and amount, 30 seconds either side.
-
-**Tech:** the feed stands in for the settlement system / other bank. A transaction with no confirmation = fake. A confirmation with no transaction = hidden.
-
-**Demo simplification:** the bank tells the feed about each real transfer over a side channel. A root attacker controlling that channel could lie to the feed too; in production the feed is a separate organisation's system with no channel from the platform. Say this in the pitch (`03-pitch-demo.md`). For A13/A14, run the fake transfer through the agent only, never the side channel.
-
-**Explain it:** Why does the feed need its own key and its own laptop?
-
-### Step 9 · Conservation, Check 4 (Jeev)
-**What:** total money in all accounts must equal starting total plus confirmed inflows minus confirmed outflows.
+### Step 8 · Layer 2 hooks (Jeev, `layers/l2_hooks/`)
+Do not rewrite Checks A or B; connect them. Check A mismatch, failed challenge or missed heartbeat → Layer 2 event → bundle with "after" version, diff vs vault "before", auditd records (who + which program). Layer 1's auditd file-write events feed the same check, so a direct edit is flagged immediately. Config decides which Layer 2 events escalate to Layer 3 (default: repeated failures, or any failure during an admin lockout).
 
 **➡ Round 2 is here.**
 
-### Step 10 · Key rotation (Jeev)
-Every N entries: new key pair, `POST /keys/rotate` signed with the old private key, then delete the old private key. The witness adds the new `key_id` with `effective_from_seq`; old `key_id`s stay valid only for entries before that seq. A stolen key can't forge the past.
+### Step 9 · Layer 3 break glass (Jeev, `layers/l3_breakglass/`)
+**Triggers:** changes to `/etc/passwd`, `/etc/shadow`, `/etc/sudoers(.d)`, admin `authorized_keys`, admin locked or removed from sudo; Layer 2 escalation; SOC panic button.
+**Response, in this exact order, never reboot:** 1 capture (processes, `ss -tnp`, sessions, auditd, log hashes) → 2 push final bundle, hash to witness → 3 isolate (iptables DROP except vault + witness) → 4 freeze (`chattr +i` or read-only remount, stop writers) → 5 lock out (lock interactive accounts, kill sessions) → 6 report FROZEN.
+**Unlock:** Shamir 2-of-3 (`pycryptodome`), holders auditor / SOC lead / legal. Log server stores only a hash of the secret. Shares go into the dashboard, never the frozen server; the witness sends a signed unlock; the log server verifies and reverses 5, 4, 3, logging the unlock.
 
-### Step 11 · Signed receipts + mock anchor (Jeev)
-Witness signs "got entry #N with hash X at time T" and returns it in the `/entries` response; the agent keeps receipts. Every few minutes the witness publishes the latest chain head on `GET /anchor/latest`; Laptop C polls it and appends to its anchor file.
+### Step 10 · Dashboard additions (Jaganath, `dashboard/`)
+SOC: live timeline color-coded by layer, state normal / alert / FROZEN, panic button. Auditor: bundle list with verification status (signature valid, hash matches witness), before / after / diff / who per incident, unlock panel (enter shares).
 
-### Step 12 · Auditor tab + export (Jaganath)
-UI on top of `GET /verify` and `GET /export`: verify a range of entries, show reconciliation results, export a report (HTML or PDF).
-
-### Step 13 · Random challenges (Jeev)
-Hash challenges (`type: hash`) at random times, replacing fixed-interval checks. No reply within 5 s = missed-challenge alert.
-
-**Only if all above are stable:** login + roles, system events (logins, agent stopped).
+### Step 11 · Demo script + full run (3rd member, `docs/demo_script.md`)
+Follow `03-pitch-demo.md` Final demo order. Write `docs/integration_map.md` (where heartbeat, checksum, keys, dashboard live and which functions the layers call) for the pitch Q&A.
 
 **➡ Final is here.**
 
 ---
 
 ## Slide-only (we explain, don't build)
-Multi-platform profiles (and profile-hash checks, A8), multiple witnesses, real blockchain/timestamp anchor, TPM, mutual TLS, MFA, Docker deployment.
+Settlement confirmation feed, conservation check, key rotation, signed receipts + external anchor, multi-witness, profiles, TPM, mutual TLS, MFA, local encrypted buffer for network cuts.

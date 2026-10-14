@@ -1,36 +1,28 @@
-# 07 · Attack List (for the 3rd member)
+# 07 · Attack List (v3, for the 3rd member)
 
-Build these as standalone scripts in `attacks/`, one file per attack: `a1_edit_entry.py`, `a2_delete_middle.py`, etc. Each script should print what it did and what alert it expects, so it doubles as the demo script.
+Standalone scripts in `attacks/`, one file per attack (`a1_nano.py`, `a2_fullpath_edit.py`, ...). Each prints what it did and what it expects, so it doubles as the demo script. Most run from the `attacker` container: log in to `log-server` with the stolen demo admin credentials, then act. Base-check attacks (A4, A5, A6) can also run directly inside `log-server`.
 
-Each targets a running system (`victim/` + `agent/` + `witness/`, and `feed/` once built). Most work by editing the SQLite file directly or stopping a process — you don't need witness/agent internals to write these. For local-vs-witness comparisons (A3, A7, T2d), run `attacks/compare_local.py`: it reads the agent's local SQLite, posts the entries to the witness's `POST /verify/compare` (available from Step 4, see `06-api-contract.md`) and prints the mismatches.
-
-| # | Attack | How | Expected | Caught by (layer) | Matching self-test |
+| # | Attack | How | Expected | Caught by | Self-test |
 |---|---|---|---|---|---|
-| A1 | Edit a stored entry | Open witness's SQLite, change one field in a stored entry | Periodic self-check hash mismatch at that entry (Layer 1 red, live within 5 s, no new entry needed) | 1 | T1b |
-| A2 | Delete entries from the middle | Delete a row from witness's SQLite | Sequence gap (periodic self-check, within 5 s) | 1 | T1c |
-| A3 | Truncate the latest entries | Delete the last few rows from the **agent's local** copy | Witness still has them; `/verify/compare` reports `missing_locally` | 2 | T2d |
-| A4 | Kill / block the agent | Stop the agent process, or disconnect Laptop A from hotspot | Silence alert within 15s | 2 | T2a / T2b |
-| A5 | Backdate a timestamp | Insert an entry with an old timestamp between two recent ones | Non-monotonic timestamp alert (not a "far from now" check — see `06-api-contract.md`) | 1 | T2c |
-| A6 | Change an amount only | Edit `amount_paise` in a stored entry | Chain break + balance mismatch on the affected account | 1, 3 | T1b, T3a |
-| A7 | Rewrite the whole local chain | Regenerate the agent's local chain from scratch with new (consistent) fake data | Witness's stored copy disagrees via `/verify/compare` (`hash_mismatch`) | 2 | T2d |
-| A9 | Steal current key, forge old entries | Use the agent's current private key to re-sign an old entry | Signature doesn't match the key that was valid for that time range | 1 | T4a |
-| A10 | Compromised witness rewrites history | Same mechanics as A1, but assume the attacker also controls the witness (so its self-check can be silenced) | Receipt and anchor mismatch: external to the witness, survives a fully compromised witness | 2, 3 | T4b |
-| A11 | Stop logging / tamper with config | Kill the agent right after editing its config | Config-stop event was logged before it died | 2 | (Step 8, if built) |
-| **A12** | **Edit DB balance directly, no log entry** | **Open `victim/`'s SQLite, change a balance, write no entry** | **Layers 1–2 stay green; state challenge mismatch (Check 2)** | **3 only** | **T3b** |
-| **A13** | **Fabricated transaction via compromised agent** | **Make the agent emit an entry for a transfer that never happened in `victim/`** | **No matching feed confirmation (Check 3)** | **3 only** | **T3c** |
-| **A14** | **Redirect: same amount, different destination** | **Edit `to_account` on an entry before it's sent, keep the amount the same** | **Feed confirms the real account; mismatch (Check 3)** | **3 only** | **T3d** |
-
-**Note on A13/A14 and the demo feed:** in the live demo, the feed is fed over a side channel from the bank (see `02-flow.md` Step 8's "demo simplification"). For A13/A14 to demonstrate the real mechanism, run the fake/redirected transaction through the **agent only**, not through that side channel — the feed must genuinely not hear about it for the mismatch to be real, not staged.
+| A1 | Edit a log with a familiar command | `nano app.log` (also `vim`, `rm`, `sed`, `cat` on a log path) | Command blocked, Layer 1 event, bundle in auditor view | Layer 1 | T5a |
+| A2 | Bypass the wrapper | `/usr/bin/nano app.log` or `\nano`, edit a record | auditd execve + dir watch → Layer 2 bundle with before / after / diff / who | Layer 1 backstop, Layer 2 | T5b, T6a |
+| A3 | Editor-style save | write a temp file in the log dir, then `mv` it over the log | Directory `-p wa` watch catches the rename | Layer 1 backstop | T5c |
+| A4 | Kill the agent | stop the agent process in `log-server` | Silence alert within 15 s, Layer 2 event | Check B | T2a |
+| A5 | Fake liveness | after A4, send unsigned or replayed heartbeats | Not counted; silence still fires | Check B | T2e |
+| A6 | Edit DB balance directly, no log entry | change a balance in `victim/` SQLite | State challenge mismatch; Checks A and B stay green | Check C | T3b |
+| A7 | Edit the witness's stored entry | change one field in the witness DB | Self-check flags it within 5 s | Check A | T1b |
+| A8 | Delete the evidence | use log-server creds, then the vault admin creds, to delete a bundle | Denied: PutObject-only policy, then compliance-mode object lock | Vault | T4a, T4b |
+| A9 | Lock the admin out | edit `/etc/sudoers` / `/etc/shadow`, or lock the admin account | Layer 3 fires, capture → push → isolate → freeze → lock out → FROZEN; attacker's session killed | Layer 3 | T7a |
+| A10 | Unlock with one share | submit a single share on the unlock panel | Refused; two shares unlock | Layer 3 | T7b |
+| A11 | SSH to the witness | `ssh witness` / port scan from `attacker` | Port 22 closed, only API port open | Witness hardening | T8a |
+| A12 | Kill the break-glass controller first | stop it before triggering A9 | Witness sees missed heartbeats; vault already holds everything streamed. Stated limit | Check B | T2a |
+| A13 | Cut the network before a bundle is pushed | drop log-server's network, then tamper | Silence on the witness. Bundle loss is an open TODO (local buffer). Stated limit | Check B | — |
 
 ## Build order for the 3rd member
-1. A1, A2, A4, A12 — needed for Round 1 (`02-flow.md` Steps 1–7).
-2. A13, A14 — needed once `feed/` exists (Step 8).
-3. A5, A6, A9, A10 — needed for Round 2.
-4. A3, A7, A11 — nice to have, only if time allows. Write `compare_local.py` first; A3 and A7 depend on it.
+1. A1, A4, A6, A7: needed for Round 1.
+2. A2, A3, A8: needed for Round 2 (after auditd + Layer 2 + vault).
+3. A9, A10, A11: needed for the Final.
+4. A5, A12, A13: nice to have; A12 and A13 mainly support the honest-limits slide.
 
-**A1 vs A10:** same action (edit the witness DB), different claim. A1 shows the live self-check catching it within 5 s. A10 assumes the witness itself is compromised, so only the agent's receipts and the off-box anchor on Laptop C can prove the rewrite.
-
-**Slide-only, not built:** A8 (turn off checks in local profile). It depends on a profile system that's slide-only this event.
-
-## Demo script
-Pulls from `03-pitch-demo.md`'s demo order: A1 → A4 → A12 → A13. Keep a recording of a clean run of this exact sequence as backup.
+## Demo order
+Final: `03-pitch-demo.md` (A1 → A2 → A8 → A9 → A10 → A11, with A6 as the "only we catch this" moment). Keep a recording of a clean run of the exact sequence as backup.

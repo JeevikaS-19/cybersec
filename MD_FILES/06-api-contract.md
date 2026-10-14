@@ -1,212 +1,175 @@
-# 06 · API Contract
+# 06 · API Contract (v3)
 
-Needed by 8:30 (Checkpoint 1), since Jaganath's dashboard and the feed both build against this.
+Needed by 8:30, since the dashboard and the attack scripts build against this.
 
-**Design choice:** the agent and feed **poll** the witness instead of the witness calling them. Only the witness (Laptop B) needs an inbound firewall rule. Laptop A and C only make outbound calls.
+**Design:** everything runs in Docker on one laptop. Containers talk by name. The `log-server` **polls** the witness; the witness never calls out. The witness exposes only its API port (no SSH).
 
 ```
-Laptop A (victim/ + agent/)  --HTTP-->  Laptop B (witness/ + dashboard/, holds shared/)  <--HTTP--  Laptop C (feed/)
+log-server (victim/ + agent/ + layers/)  --HTTP-->  witness:8000  <--HTTP--  dashboard
+log-server  --S3 PutObject only-->  vault:9000 (MinIO)  <--S3 read only--  dashboard (auditor)
 ```
 
-Base URLs: set `WITNESS_URL` as an env var on all 3 laptops, e.g. `http://192.168.1.2:8000` (write the real IP on the sticky note at 8:00).
+`WITNESS_URL=http://witness:8000`, `VAULT_URL=http://vault:9000`, set in `docker/docker-compose.yml`.
 
-All amounts: **integer paise**. All timestamps: ISO 8601 UTC string. All keys and hashes: base64-encoded raw bytes. All signatures: base64-encoded Ed25519 signature over the canonical-encoded bytes of the fields listed in **What gets signed** below. Canonical encoding is implemented once in `shared/` and imported by both `agent/` and `witness/` — never reimplemented on either side.
+All amounts: **integer paise**. All timestamps: ISO 8601 UTC string. All keys, hashes and signatures: base64 of raw bytes. Canonical encoding is implemented once in `shared/` and imported everywhere — never reimplemented.
 
 ## What gets signed (exact field lists)
 | Message | Signed payload (canonical encoding via `shared/`) | Signed with |
 |---|---|---|
-| Entry | every entry field except `signature` (`seq` through `hash`) | agent's current key |
-| Heartbeat | `{platform_id, timestamp}` | agent's current key |
-| Hash-challenge response | `{challenge_id, type, latest_hash, last_seq}` | agent's current key |
-| State-challenge response | `{challenge_id, type, account, balance_paise, last_seq}` | agent's current key |
-| Feed confirmation | `{txn_id, from_account, to_account, amount_paise, confirmed_at}` | feed's key |
-| Key rotation | `{platform_id, new_public_key}` | agent's OLD key |
-| Receipt / anchor | the receipt or anchor fields except `signature` | witness key |
+| Entry | every entry field except `signature` (`seq` through `hash`) | agent key |
+| Heartbeat | `{platform_id, timestamp}` | agent key |
+| Hash-challenge response | `{challenge_id, type, latest_hash, last_seq}` | agent key |
+| State-challenge response | `{challenge_id, type, account, balance_paise, last_seq}` | agent key |
+| Layer event | every event field except `signature` | agent key |
+| Evidence bundle (in vault) | the bundle JSON except `signature` | agent key |
+| Break-glass command | `{command_id, action, issued_at, secret}` (`secret` only on unlock) | witness key |
 
-**Genesis:** `GENESIS_PREV_HASH = base64.b64encode(b"\x00" * 32)` = `"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`, defined in `shared/`. The `seq = 0` entry uses it as `prev_hash`.
+**Genesis:** `GENESIS_PREV_HASH = base64.b64encode(b"\x00" * 32)` = `"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`, in `shared/`.
 
 ---
 
-## Registration (Step 0, after the witness is up — before any entry or confirmation)
+## Registration (Step 3)
 
 ### `POST /register/agent`
-Called once by the agent at startup, before it sends its first entry or heartbeat.
 ```json
 // request
-{ "platform_id": "victim-bank-1", "public_key": "base64..." }
+{ "platform_id": "log-server-1", "public_key": "base64..." }
 // response
-{ "status": "registered", "platform_id": "victim-bank-1", "key_id": "agent-key-0" }
+{ "status": "registered", "platform_id": "log-server-1", "key_id": "agent-key-0", "witness_public_key": "base64..." }
 ```
-Witness stores `key_id -> public_key` per `platform_id`. It's a growing map (rotation adds to it), not a single current key.
-
-### `POST /register/feed`
-Called once by the feed at startup, before it sends its first confirmation.
-```json
-// request
-{ "feed_id": "settlement-1", "public_key": "base64..." }
-// response
-{ "status": "registered", "feed_id": "settlement-1", "key_id": "feed-key-0" }
-```
-
-Witness refuses `/entries`, `/heartbeat` and `/feed/confirmations` from any key it hasn't registered. An unrecognised `key_id` is a rejection (`reason: "unknown_key_id"`), never a crash.
+Witness stores `key_id -> public_key` per `platform_id`. Unknown `key_id` anywhere = rejection `unknown_key_id`, never a crash. The agent keeps `witness_public_key` to verify break-glass commands.
 
 ---
 
-## Entries (Step 3 to 4)
+## Entries — Check A (Step 3)
 
 ### `POST /entries`
 ```json
 // request
 {
-  "seq": 42,
-  "timestamp": "2026-10-14T08:45:00Z",
-  "event_type": "transaction",
-  "txn_id": "txn-00042",
-  "from_account": "acc-1",
-  "to_account": "acc-2",
-  "amount_paise": 150000,
-  "from_balance_paise": 4850000,
-  "to_balance_paise": 2150000,
-  "prev_hash": "base64...",
-  "key_id": "agent-key-3",
-  "hash": "base64...",
-  "signature": "base64..."
+  "seq": 42, "timestamp": "2026-10-14T08:45:00Z", "event_type": "transaction",
+  "txn_id": "txn-00042", "from_account": "acc-1", "to_account": "acc-2",
+  "amount_paise": 150000, "from_balance_paise": 4850000, "to_balance_paise": 2150000,
+  "prev_hash": "base64...", "key_id": "agent-key-0", "hash": "base64...", "signature": "base64..."
 }
-// response (accepted)
-{ "status": "accepted", "receipt": { "seq": 42, "hash": "base64...", "witness_time": "...", "signature": "base64..." } }
-// response (rejected)
+// response
+{ "status": "accepted" }
 { "status": "rejected", "reason": "chain_break" | "bad_signature" | "sequence_gap" | "non_monotonic_timestamp" | "unknown_key_id" }
 ```
-**Checked against the last accepted entry.** The witness tracks `last_good_seq` / `last_good_hash` separately from "last entry received". Only accepted entries advance them. Every new entry is validated against `last_good_*`, never against a rejected entry. A rejected entry is stored and raises exactly one alert, so one attack never cascades into failing every later entry.
+- Validated against `last_good_seq` / `last_good_hash` (accepted entries only). A rejected entry is stored and raises exactly one alert; it never becomes the reference, so one attack never cascades.
+- `non_monotonic_timestamp` = earlier than the last accepted entry. Not "close to now": queued retries arrive late and must not alert.
 
-`non_monotonic_timestamp` fires only when an entry's timestamp is **earlier than the last accepted entry's timestamp** — not based on how far the timestamp is from the witness's current wall clock. This matters because retried entries (queued during a disconnect, see `02-flow.md` Step 3's fallback) can legitimately arrive late with an older-but-still-increasing timestamp; that must not alert.
+### Periodic self-check (witness-internal, every 5 s)
+Re-hashes stored accepted entries via `shared/`, checks `prev_hash` links and `seq` continuity. Mismatch = direct DB edit: Check A red within 5 s, one alert per broken entry.
 
-A rejected entry is still stored and raises an alert — rejection is the alert, not a silent drop.
+### `GET /verify?from_seq=0&to_seq=42`
+Recomputes the witness's stored chain for a range; per-entry pass/fail plus a summary.
 
 ---
 
-## Heartbeat (Step 4, liveness only)
+## Heartbeat — Check B (Step 3)
 
 ### `POST /heartbeat`
 ```json
-// request
-{ "platform_id": "victim-bank-1", "timestamp": "...", "signature": "base64..." }
+{ "platform_id": "log-server-1", "timestamp": "...", "signature": "base64..." }
 // response
 { "status": "ok" }
 ```
-Agent sends this every 5 seconds regardless of transaction volume. A heartbeat only resets the silence timer if its signature verifies against the registered key for `platform_id` **and** its timestamp is later than the previous accepted heartbeat (no replays). Unsigned, badly signed or replayed heartbeats don't count. Missing valid heartbeats for >15s = silence alert. (No `profile_hash`: profiles are slide-only.) This is the only "is the agent still alive right now" check — entry timestamps (above) check ordering, not freshness.
+Every 5 s. Counts only if the signature verifies and the timestamp is later than the last accepted heartbeat. No valid heartbeat for >15 s = silence alert (Check B red, Layer 2 event).
 
 ---
 
-## Challenges (Step 7, 13) — agent polls, doesn't get called
+## Challenges — Checks B and C (Steps 3 to 4) — log-server polls
 
-### `GET /challenge/poll?platform_id=victim-bank-1`
+### `GET /challenge/poll?platform_id=log-server-1`
 ```json
-// response, nothing pending
 { "challenge": null }
-// response, hash challenge
 { "challenge": { "id": "c-101", "type": "hash" } }
-// response, state challenge (Check 2)
 { "challenge": { "id": "c-102", "type": "state", "account": "acc-1" } }
 ```
-Agent polls every 2 seconds.
+Polled every 2 s. Issued at random times.
 
 ### `POST /challenge/response`
 ```json
-// hash challenge response
 { "challenge_id": "c-101", "type": "hash", "latest_hash": "base64...", "last_seq": 42, "signature": "base64..." }
-// state challenge response (Check 2)
 { "challenge_id": "c-102", "type": "state", "account": "acc-1", "balance_paise": 4850000, "last_seq": 42, "signature": "base64..." }
 // response
 { "status": "ok" | "mismatch" }
 ```
-No response within 5 seconds of a challenge being issued = missed-challenge alert.
+No response within 5 s = missed-challenge alert. A state mismatch against the witness's replay at `last_seq` = Check C red.
 
 ---
 
-## Feed confirmations (Step 8, Check 3)
+## Layer events + evidence (Steps 5 to 9)
 
-### `POST /feed/confirmations`
+### `POST /events`
+Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so the bundle itself is tamper-evident.
 ```json
-// request
 {
-  "txn_id": "txn-00042",
-  "from_account": "acc-1",
-  "to_account": "acc-2",
-  "amount_paise": 150000,
-  "confirmed_at": "2026-10-14T08:45:05Z",
-  "key_id": "feed-key-0",
-  "signature": "base64..."
+  "event_id": "ev-0007", "layer": 1, "trigger": "wrapper:nano",
+  "time": "...", "who": { "auid": 1001, "uid": 0, "process": "nano", "exe": "/opt/trip/bin/nano", "src_ip": "172.18.0.6" },
+  "bundle_key": "bundles/ev-0007.json", "bundle_hash": "base64...",
+  "state": "normal" | "alert" | "frozen",
+  "key_id": "agent-key-0", "signature": "base64..."
 }
 // response
 { "status": "accepted" }
 ```
-Matching window: 30 seconds either side. Unmatched after the window = alert (A13 if entry exists with no confirmation, "missing entry" if confirmation exists with no entry).
+`bundle_key` is the object name in the vault. The auditor view checks that the vault object's hash equals `bundle_hash` and that its signature is valid.
+
+### Vault (MinIO, S3 API, not a witness route)
+- Bucket `evidence`, object lock on, **compliance** retention, 1 day for the demo. Versioning on (required by object lock).
+- `log-server` credential: `s3:PutObject` only. No read, no delete.
+- `auditor` credential: read only. Used by the dashboard.
+- Prefixes: `stream/` (every log entry as written, the "before" copy), `bundles/` (evidence bundles).
 
 ---
 
-## Verification (Step 4 core, Step 12 full UI)
+## Break glass — Layer 3 (Step 9) — log-server polls
 
-### `GET /verify?from_seq=0&to_seq=42`
-Recomputes the witness's **own** stored chain for a range and returns per-entry pass/fail plus a summary. **Available from Step 4** as a raw endpoint. The Step 12 auditor tab is just a UI on this route. It does not compare against the agent; use `/verify/compare` for that.
-
-### `POST /verify/compare` (Step 4)
+### `POST /breakglass/panic` (dashboard, SOC)
 ```json
-// request: the agent's local entries, same shape as /entries payloads
-{ "entries": [ ] }
+{ "reason": "manual panic", "by": "soc-lead" }
+```
+
+### `POST /breakglass/unlock` (dashboard, auditor panel)
+```json
+{ "shares": [ { "holder": "auditor", "index": 1, "share": "base64..." }, { "holder": "legal", "index": 3, "share": "base64..." } ] }
 // response
-{ "mismatches": [ { "seq": 17, "reason": "missing_locally" | "hash_mismatch" | "extra_locally" } ], "match_count": 41 }
+{ "status": "unlock_issued" } | { "status": "error", "reason": "not_enough_shares" }
 ```
-Used by `attacks/compare_local.py` (reads the agent's local SQLite, posts it here, prints mismatches). This is what T2d, A3 and A7 run against.
+The witness reconstructs the secret from any 2 shares and queues a signed unlock command. Shares are never typed on the frozen log server.
 
----
-
-## Periodic self-check (Step 4, witness-internal, no route)
-Every 5 seconds the witness re-reads its stored **accepted** entries, recomputes each `hash` from its fields via `shared/`, and checks `prev_hash` links and `seq` continuity. A mismatch means the witness DB was edited directly (A1, A2): chain-break alert, Layer 1 red within 5 s, no new entry needed. One alert per broken entry (de-duplicated), not one every cycle. Rejected entries are skipped (they're stored as evidence, not part of the chain).
-
-This does **not** defend against a compromised witness (A10): an attacker with the witness could also silence this job. That's what receipts and anchors are for.
-
----
-
-## Key rotation (Step 10)
-
-### `POST /keys/rotate`
+### `GET /breakglass/poll?platform_id=log-server-1`
 ```json
-// request (signed with the OLD private key over {platform_id, new_public_key})
-{ "platform_id": "victim-bank-1", "new_public_key": "base64...", "signature": "base64..." }
-// response
-{ "status": "rotated", "key_id": "agent-key-1", "effective_from_seq": 101 }
+{ "command": null }
+{ "command": { "command_id": "bg-3", "action": "freeze" | "unlock", "issued_at": "...", "secret": "base64... (unlock only)", "signature": "base64..." } }
 ```
-Witness verifies the signature against the currently registered key for that `platform_id`. The old `key_id` stays valid only for entries with `seq < effective_from_seq`; new entries must use the new `key_id`.
+Log server verifies the witness signature, and for unlock checks `sha256(secret)` against its stored hash, then reverses steps 5, 4, 3 and reports via `POST /events` (`state: normal`). Freeze/FROZEN progress is also reported via `POST /events`.
 
 ---
 
-## Anchor (Step 11) — Laptop C pulls, witness never calls out
-
-### `GET /anchor/latest`
-```json
-{ "chain_head_hash": "base64...", "last_seq": 100, "anchored_at": "...", "signature": "base64..." }
-```
-Laptop C polls every few minutes and appends the response to its local anchor file.
-
----
-
-## Dashboard reads (Step 6, 12) — polled by `dashboard/`
+## Dashboard reads (Steps 6, 10) — polled by `dashboard/`
 
 ### `GET /status`
 ```json
 {
-  "layer1": "green" | "red",
-  "layer2": "green" | "red",
-  "layer3": "green" | "red",
-  "last_entry_seq": 42,
-  "last_seen": "..."
+  "checks": { "A": "green" | "red", "B": "green" | "red", "C": "green" | "red" },
+  "layers": { "1": "on" | "off" | "tripped", "2": "on" | "off" | "tripped", "3": "on" | "off" | "frozen" },
+  "state": "normal" | "alert" | "frozen",
+  "last_entry_seq": 42, "last_seen": "..."
 }
+```
+`layers` reflect `config/layers.yaml` (each layer switchable for the demo).
+
+### `GET /timeline?since=0`
+```json
+{ "events": [ { "event_id": "ev-0007", "layer": 1, "trigger": "wrapper:nano", "time": "...", "who": { }, "bundle_key": "bundles/ev-0007.json" } ] }
 ```
 
 ### `GET /alerts?since=0`
 ```json
-{ "alerts": [ { "id": 1, "type": "chain_break", "seq": 17, "detail": "...", "time": "...", "acknowledged": false } ] }
+{ "alerts": [ { "id": 1, "type": "chain_break", "check": "A", "seq": 17, "detail": "...", "time": "...", "acknowledged": false } ] }
 ```
 
 ### `POST /alerts/{id}/ack`
@@ -215,7 +178,7 @@ Laptop C polls every few minutes and appends the response to its local anchor fi
 ```
 
 ### `GET /export`
-Returns the full auditor report (HTML or JSON, Jaganath's call).
+Full auditor report (HTML or JSON, Jaganath's call).
 
 ---
 

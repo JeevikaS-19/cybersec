@@ -1,3 +1,5 @@
+> **Superseded by the v3 switch (`LAYERS_PLAN.md`, see `08-fixes-changelog.md`).** Kept for history. Do not apply.
+
 # 09 · Fixes to Apply (feed this whole file to Claude Code)
 
 This is the authoritative patch spec. Apply every change below to the named files. Where a decision was needed, the decision is already made — implement it as stated, don't re-derive it.
