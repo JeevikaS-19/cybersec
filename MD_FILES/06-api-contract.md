@@ -11,6 +11,8 @@ log-server  --S3 PutObject only-->  vault:9000 (MinIO)  <--S3 read only--  dashb
 
 `WITNESS_URL=http://witness:8000`, `VAULT_URL=http://vault:9000`, set in `docker/docker-compose.yml`.
 
+**Before Round 1 (Steps 0 to 5) everything runs natively, no Docker:** `WITNESS_URL=http://127.0.0.1:8000`, and "log-server" means the local `victim/` + `agent/` processes. Routes and bodies are identical, so nothing changes when the services move into containers in Step 6.
+
 All amounts: **integer paise**. All timestamps: ISO 8601 UTC string. All keys, hashes and signatures: base64 of raw bytes. Canonical encoding is implemented once in `shared/` and imported everywhere — never reimplemented.
 
 ## What gets signed (exact field lists)
@@ -28,7 +30,7 @@ All amounts: **integer paise**. All timestamps: ISO 8601 UTC string. All keys, h
 
 ---
 
-## Registration (Step 3)
+## Registration (Step 2b)
 
 ### `POST /register/agent`
 ```json
@@ -41,7 +43,7 @@ Witness stores `key_id -> public_key` per `platform_id`. Unknown `key_id` anywhe
 
 ---
 
-## Entries — Check A (Step 3)
+## Entries — Check A (Step 2)
 
 ### `POST /entries`
 ```json
@@ -67,7 +69,7 @@ Recomputes the witness's stored chain for a range; per-entry pass/fail plus a su
 
 ---
 
-## Heartbeat — Check B (Step 3)
+## Heartbeat — Check B (Step 2)
 
 ### `POST /heartbeat`
 ```json
@@ -79,7 +81,7 @@ Every 5 s. Counts only if the signature verifies and the timestamp is later than
 
 ---
 
-## Challenges — Checks B and C (Steps 3 to 4) — log-server polls
+## Challenges — Checks B and C, Layer 2 (Steps 2 to 3) — log-server polls
 
 ### `GET /challenge/poll?platform_id=log-server-1`
 ```json
@@ -100,13 +102,13 @@ No response within 5 s = missed-challenge alert. A state mismatch against the wi
 
 ---
 
-## Layer events + evidence (Steps 5 to 9)
+## Layer events + evidence (Steps 7 to 10)
 
 ### `POST /events`
 Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so the bundle itself is tamper-evident.
 ```json
 {
-  "event_id": "ev-0007", "layer": 1, "trigger": "wrapper:nano",
+  "event_id": "ev-0007", "layer": 1, "trigger": "wrapper:nano", "tamper_type": null,
   "time": "...", "who": { "auid": 1001, "uid": 0, "process": "nano", "exe": "/opt/trip/bin/nano", "src_ip": "172.18.0.6" },
   "bundle_key": "bundles/ev-0007.json", "bundle_hash": "base64...",
   "state": "normal" | "alert" | "frozen",
@@ -125,7 +127,7 @@ Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so t
 
 ---
 
-## Break glass — Layer 3 (Step 9) — log-server polls
+## Break glass — Layer 3 (Step 10) — log-server polls
 
 ### `POST /breakglass/panic` (dashboard, SOC)
 ```json
@@ -149,7 +151,7 @@ Log server verifies the witness signature, and for unlock checks `sha256(secret)
 
 ---
 
-## Dashboard reads (Steps 6, 10) — polled by `dashboard/`
+## Dashboard reads (Step 5 watcher, Step 6 dashboard, extended in Step 11)
 
 ### `GET /status`
 ```json
@@ -169,8 +171,10 @@ Log server verifies the witness signature, and for unlock checks `sha256(secret)
 
 ### `GET /alerts?since=0`
 ```json
-{ "alerts": [ { "id": 1, "type": "chain_break", "check": "A", "seq": 17, "detail": "...", "time": "...", "acknowledged": false } ] }
+{ "alerts": [ { "id": 1, "type": "chain_break", "check": "A", "tamper_type": "entry_edited", "seq": 17, "detail": "field amount_paise: 150000 -> 1500000", "time": "...", "acknowledged": false } ] }
 ```
+
+**`tamper_type` values (Layer 2 classifier, Step 4):** `entry_edited`, `entry_deleted`, `entries_reordered`, `entry_replayed`, `entry_inserted`, `backdated`, `forged`, `agent_silenced`, `balance_misreported`, `db_edited_without_log`. Layer 1 and 3 events use `tamper_type: null`. For `entry_edited`, `detail` names the field and old -> new value once the vault exists.
 
 ### `POST /alerts/{id}/ack`
 ```json

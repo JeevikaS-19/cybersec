@@ -22,9 +22,9 @@
 9. Human can explain the step out loud before moving on. If not, ask Antigravity to explain, don't move on.
 
 ## Naming (use exactly)
-- **Checks** detect: **A** sealed chain, **B** outside witness, **C** truth check.
-- **Layers** respond: **1** command tripwire, **2** hooks, **3** break glass.
-- Never call a check a "layer" or the other way round, in code, UI or slides.
+- **Layer 2** heartbeat + checksum (built first): contains **Check A** sealed chain, **Check B** outside witness, **Check C** truth check, and the tamper classifier (`tamper_type` on every alert).
+- **Layer 1** command tripwire (built second). **Layer 3** break glass (built last).
+- Use these names exactly in code, UI and slides. Checks A to C are parts of Layer 2, never separate layers.
 
 ## Rules for Antigravity (builder)
 - Ask before acting. Never start the next step on your own.
@@ -58,7 +58,7 @@
 
 ## Team rules
 - One repo. Folders and owners: see `02-flow.md` (Folders and owners).
-- `shared/` is written once in Step 3 and only changed by Jeev after that, with a heads-up in chat.
+- `shared/` is written once in Step 2a and only changed by Jeev after that, with a heads-up in chat.
 - Two AI agents never edit the same folder at the same time.
 - `main` must always `docker compose up` and demo. Work on a branch per step.
 - Time-box: if a step is stuck for 45 minutes, use its fallback and move on.
@@ -91,7 +91,7 @@
 ## Good vs bad prompts
 | Bad | Good |
 |---|---|
-| "Build the agent" | "Do Step 3 from 02-flow.md. Plan first." |
-| "Fix it" | "Step 4 test fails: `seq mismatch at 12`. Find the cause." |
-| "Review everything" | "Review the diff for Step 5 against 02-flow.md and 06-api-contract.md. Run tests T5a to T5c." |
+| "Build the agent" | "Do Step 2b from 02-flow.md. Plan first." |
+| "Fix it" | "Step 2c test fails: `seq mismatch at 12`. Find the cause." |
+| "Review everything" | "Review the diff for Step 4 against 02-flow.md and 06-api-contract.md. Run tests T9a to T9c." |
 | "Explain the code" | "Explain the prev_hash check in 3 lines." |

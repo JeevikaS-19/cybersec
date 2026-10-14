@@ -4,7 +4,7 @@ Focus: **innovation, scalability, product ready, amazing pitch.**
 
 **One line:** *Logs that prove they weren't changed, catch the intruder in the act, and lock the door behind them.*
 
-**Story in three beats:** **Detect** (Checks A, B, C) → **Respond** (Layers 1, 2, 3) → **Prove** (signed evidence bundles in a vault no one can delete from).
+**Story in three layers:** **Layer 2** detects tampering and names what kind (heartbeat + checksums, Checks A to C) → **Layer 1** catches the intruder in the act (tripwire) → **Layer 3** is the last resort (break glass). Every incident becomes a signed bundle in a vault no one can delete from.
 
 ---
 
@@ -12,27 +12,28 @@ Focus: **innovation, scalability, product ready, amazing pitch.**
 **Slides (5 min)**
 1. **Hook:** A bank insider with admin access edits a balance at 2 a.m. and covers it up. Logs are the only evidence, and the attacker controls them.
 2. **Problem:** logs sit on the same machine as the attacker. Admin access = edit access, and most tools only notice afterwards, if at all.
-3. **Detect:** Check A sealed chain (was anything changed?), Check B outside witness (is the agent still alive and honest?), Check C truth check (does the log match the bank's real state?).
-4. **Respond:** Layer 1 tripwire (intruder habits give them away), Layer 2 evidence on every failure, Layer 3 break glass (freeze everything if the admin is locked out).
+3. **Layer 2, built today:** heartbeat + checksums. Check A (was anything changed?), Check B (is the agent alive and honest?), Check C (does the log match the bank's real state?). Every alert says *what kind* of tampering: edited, deleted, reordered, backdated, forged, silenced.
+4. **Coming next:** Layer 1 tripwire (intruder habits give them away), Layer 3 break glass (freeze everything if the admin is locked out).
 5. **Prove:** every incident becomes a signed bundle in a write-once vault; its hash goes to the witness.
 6. **Skeleton demo** (below).
 7. **Plan to Round 2 and Final.**
 
 **Live demo (2 min)**
-- `docker compose up` already running: logs streaming, Checks A to C green.
-- Attacker types `nano app.log` → **Layer 1 trips**, command blocked, event on the SOC timeline.
-- Edit a balance directly in the bank DB (A6) → **Check C red** while A and B stay green. "Every other log system just missed this."
-- If anything breaks: dashboard fake-data mode and walk through the story.
+- Fake bank, agent and witness already running locally; the terminal watcher shows Checks A to C green.
+- Edit a stored entry (A7) → Check A red within 5 s, alert says **`entry_edited`**.
+- Delete an entry → **`entry_deleted`**. Kill the agent (A4) → **`agent_silenced`**.
+- Edit a balance directly in the bank DB (A6) → **Check C red** while A and B stay green, **`db_edited_without_log`**. "Every other log system just missed this."
+- If anything breaks: play the backup recording and walk through the story.
 
 ---
 
 ## Round 2 · 7:30 to 8:30 PM · It works
 **Demo (4 min)**
-1. All green.
-2. `nano app.log` → Layer 1 trips.
-3. Bypass with `/usr/bin/nano`, edit a record → **auditd backstop + Layer 2**: auditor view shows before / after / diff / who.
+1. All green. Quick Layer 2 recap: edit an entry → `entry_edited`.
+2. **Layer 1:** `nano app.log` → tripwire, command blocked.
+3. Bypass with `/usr/bin/nano`, edit a record → **auditd backstop feeds Layer 2**: auditor view shows before / after / diff / **who**.
 4. Try to delete that evidence from the vault → **denied** by object lock, even with the vault admin credential.
-5. Kill the agent → Check B silence alert.
+5. DB edit (A6) → Check C, `db_edited_without_log`.
 
 **Fallback (if auditd failed in Phase 0):** step 3 uses the inotify fallback; say so. Decide by 6:30, rehearse it, never improvise live.
 
@@ -44,8 +45,8 @@ Focus: **innovation, scalability, product ready, amazing pitch.**
 
 **Live demo (follows `docs/demo_script.md`)**
 1. Normal operation: logs streaming, heartbeats green.
-2. Stolen admin creds, `nano app.log` → **Layer 1 trips**, bundle in auditor view.
-3. `/usr/bin/nano` edit → **auditd + Layer 2**, before / after / diff / who.
+2. **Layer 2:** edit an entry and edit a DB balance → each alert names the tamper type.
+3. Stolen admin creds, `nano app.log` → **Layer 1 trips**; `/usr/bin/nano` edit → auditd + Layer 2, before / after / diff / who.
 4. Delete the evidence in the vault → denied by object lock.
 5. Attacker locks the admin out → **Layer 3 fires**, system FROZEN, attacker's session killed too.
 6. Two key holders enter shares in the dashboard → unlocks; every step is in the evidence trail.

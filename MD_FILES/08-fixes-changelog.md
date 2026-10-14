@@ -20,3 +20,13 @@
 - Dropped to slide-only: settlement feed (old Check 3), conservation check, key rotation, signed receipts, external anchor, `/verify/compare`.
 - Rewritten: `00`, `01`, `02`, `03`, `05`, `06`, `07`. Updated: `04`, `LAYERS_PLAN.md` header and ground rules. New routes: `/events`, `/timeline`, `/breakglass/*`; `/status` now reports `checks`, `layers` and `state`.
 - Allowed libraries added: pycryptodome (Shamir), minio, pyyaml.
+
+## Build order: Layer 2 → Layer 1 → Layer 3
+- Layer 2 is now the heartbeat + checksum layer itself (Checks A to C), plus a tamper classifier: every alert carries a `tamper_type`. Built first, demoed in Round 1.
+- Layer 1 (tripwire + auditd backstop) in Round 2; Layer 3 (break glass) for the Final.
+- Updated `01`, `02`, `03`, `05`, `06`, `07`, `LAYERS_PLAN.md`.
+
+## Independent work until Round 1
+- Jaganath's work (Docker, dashboard, full bank app) moves after the 3 PM round (Step 6).
+- Steps renumbered: 0 setup, 1 fake bank stub, 2 Checks A + B (2a shared, 2b agent, 2c witness), 3 Check C, 4 classifier, 5 terminal watcher, then 6 Docker, 7 vault, 8 to 9 Layer 1, 10 Layer 3, 11 dashboard additions, 12 demo. Phase 0 is a side task for the 3rd member.
+- Layer 2 runs natively (no Docker) before Round 1; Round 1 demo uses the terminal watcher.

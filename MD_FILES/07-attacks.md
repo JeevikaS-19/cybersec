@@ -19,10 +19,11 @@ Standalone scripts in `attacks/`, one file per attack (`a1_nano.py`, `a2_fullpat
 | A13 | Cut the network before a bundle is pushed | drop log-server's network, then tamper | Silence on the witness. Bundle loss is an open TODO (local buffer). Stated limit | Check B | — |
 
 ## Build order for the 3rd member
-1. A1, A4, A6, A7: needed for Round 1.
-2. A2, A3, A8: needed for Round 2 (after auditd + Layer 2 + vault).
-3. A9, A10, A11: needed for the Final.
-4. A5, A12, A13: nice to have; A12 and A13 mainly support the honest-limits slide.
+Build order follows Layer 2 -> Layer 1 -> Layer 3.
+1. A4, A5, A6, A7 (Layer 2: checks + classifier): needed for Round 1. Run them natively against Jeev's local processes (no Docker before Round 1). Also script the T1c/T1d/T2c variants (delete, reorder, backdate) so the classifier demo shows several tamper types.
+2. A8 (vault), A1, A2, A3 (Layer 1 + auditd backstop): needed for Round 2, in Docker.
+3. A9, A10, A11 (Layer 3 + witness hardening): needed for the Final.
+4. A12, A13: nice to have; A12 and A13 mainly support the honest-limits slide.
 
 ## Demo order
-Final: `03-pitch-demo.md` (A1 → A2 → A8 → A9 → A10 → A11, with A6 as the "only we catch this" moment). Keep a recording of a clean run of the exact sequence as backup.
+Final: `03-pitch-demo.md` (Layer 2: A7 → A6, then Layer 1: A1 → A2 → A8, then Layer 3: A9 → A10, then A11). A6 is the "only we catch this" moment. Keep a recording of a clean run of the exact sequence as backup.

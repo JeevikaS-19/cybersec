@@ -26,7 +26,7 @@ Copy into `AGENTS.md` and `CLAUDE.md` under the rules.
 ## Good vs bad prompts
 | Bad | Good |
 |---|---|
-| "Build the agent" | "Do Step 3 from 02-flow.md. Plan first." |
-| "Fix it" | "Step 4 test fails: `seq mismatch at 12`. Find the cause." |
-| "Review everything" | "Review the diff for Step 5 against 02-flow.md and 06-api-contract.md. Run tests T5a to T5c." |
+| "Build the agent" | "Do Step 2b from 02-flow.md. Plan first." |
+| "Fix it" | "Step 2c test fails: `seq mismatch at 12`. Find the cause." |
+| "Review everything" | "Review the diff for Step 4 against 02-flow.md and 06-api-contract.md. Run tests T9a to T9c." |
 | "Explain the code" | "Explain the prev_hash check in 3 lines." |

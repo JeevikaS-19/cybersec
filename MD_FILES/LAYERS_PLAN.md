@@ -7,7 +7,7 @@ Hackurity 2026, PS-6. This is the whole plan (v3 replaces the old v2 build). The
 Antigravity builds; Claude Code reviews and tests (`01-rules.md`). Where this file says "Claude Code", read it as the builder.
 
 
-- **Build the base minimally, then don't rebuild it.** The base (Checks A to C: per-entry checksums, balance reconciliation, signing keys, heartbeat + random witness challenges, SOC and auditor views) is `02-flow.md` Steps 3 to 4. Layers reuse it. Keep `docs/integration_map.md` up to date: where heartbeat, checksum verification, signing keys and the dashboard live, and which functions the layers call. Key rotation is slide-only this event.
+- **Build the base minimally, then don't rebuild it.** The base (Checks A to C: per-entry checksums, balance reconciliation, signing keys, heartbeat + random witness challenges, SOC and auditor views) is `02-flow.md` Steps 2 to 3. Layers reuse it. Keep `docs/integration_map.md` up to date: where heartbeat, checksum verification, signing keys and the dashboard live, and which functions the layers call. Key rotation is slide-only this event.
 - **Ask before changing v2 core modules.** New code goes in new modules. If a v2 function needs a hook, add the smallest possible hook and say what you changed.
 - **Every layer can be switched on and off in config** so we can demo them one at a time.
 - Language: **Python 3.11+**. Tests: **pytest**. Keep code readable over clever.
@@ -174,17 +174,17 @@ tests/
 
 ## Build order
 
-1. Phase 0 kernel spike
-2. Docker compose with all five containers running
-3. Minimal base: Checks A to C (`02-flow.md` Steps 3 to 4), integration map
-4. Evidence bundles + vault (shared piece)
-5. Layer 1
-6. Layer 2 hooks
-7. Layer 3
-8. Dashboard additions
-9. Demo script and full run-through
+Order: **Layer 2 → Layer 1 → Layer 3** (details in `02-flow.md`).
 
-Steps 1 to 5 alone are already a demoable story, so if time runs short, the project still has a working story.
+1. **Layer 2, natively, before Round 1:** fake bank stub, Checks A to C (heartbeat + checksums), tamper classifier, terminal watcher. Phase 0 kernel spike in parallel (3rd member)
+2. Docker compose with all five containers running (after Round 1)
+3. **Layer 2, continued:** evidence bundles + vault
+4. **Layer 1:** wrappers + team commands, auditd backstop feeding Layer 2
+5. **Layer 3:** break glass + Shamir unlock
+6. Dashboard additions
+7. Demo script and full run-through, integration map
+
+Steps 1 to 3 alone are already a demoable story, so if time runs short, the project still has a working story.
 
 ## Demo script outline (write the full version in `docs/demo_script.md`)
 

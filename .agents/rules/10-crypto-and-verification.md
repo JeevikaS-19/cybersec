@@ -3,7 +3,7 @@ trigger: glob
 globs: shared/**, agent/**, witness/**, layers/common/**
 ---
 
-# Base checks and crypto (Checks A to C, evidence signing)
+# Layer 2 core and crypto (Checks A to C, classifier, evidence signing)
 
 - Fields, routes and the exact signed-field lists: `MD_FILES/06-api-contract.md` ("What gets signed"). Never rename or add fields without asking.
 - Encoding, hashing, signing and `GENESIS_PREV_HASH` (base64 of 32 zero bytes) live only in `shared/`. Canonical = `json.dumps(d, sort_keys=True, separators=(",", ":")).encode("utf-8")`. `hash` covers every field except `hash` and `signature`. Floats raise an error.
