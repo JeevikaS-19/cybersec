@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS balances (
     account TEXT PRIMARY KEY,
     balance_paise INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS events (
+    event_id TEXT PRIMARY KEY,
+    layer INTEGER NOT NULL,
+    trigger TEXT NOT NULL,
+    time TEXT NOT NULL,
+    body TEXT NOT NULL,
+    received REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -76,7 +84,7 @@ def set_state(conn, key, value):
         conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, json.dumps(value)))
 
 def add_alert(conn, kind, ref, tamper_type, detail, now_ts):
-    if tamper_type not in TAMPER_TYPES:
+    if tamper_type is not None and tamper_type not in TAMPER_TYPES:
         print(f"WARNING: unknown tamper_type {tamper_type!r} on alert {kind} ref {ref}")
     # One alert per (kind, ref): repeated self-checks never duplicate it.
     with conn:

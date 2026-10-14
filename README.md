@@ -24,8 +24,8 @@ flowchart LR
 
 | Layer | What it does | Status |
 |---|---|---|
-| **Layer 2 · Heartbeat + checksum** | Detects tampering and names what kind | ✅ Checks A to C built · classifier in progress |
-| **Layer 1 · Command tripwire** | Catches the intruder in the act (`nano app.log` → blocked + alert; auditd backstop) | 🛠 Next |
+| **Layer 2 · Heartbeat + checksum** | Detects tampering and names what kind | ✅ Built |
+| **Layer 1 · Command tripwire** | Catches the intruder in the act: `nano app.log` opens a decoy, the real log is untouched, and what they tried to change is captured | ✅ Built · auditd backstop next |
 | **Layer 3 · Break glass** | Last resort: capture evidence, isolate, freeze, unlock only with 2-of-3 key holders. Never reboots. | 🛠 Planned |
 
 ### Layer 2 checks

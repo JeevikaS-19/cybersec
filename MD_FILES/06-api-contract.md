@@ -105,10 +105,10 @@ No response within 5 s = missed-challenge alert. A state mismatch against the wi
 ## Layer events + evidence (Steps 7 to 10)
 
 ### `POST /events`
-Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so the bundle itself is tamper-evident.
+Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so the bundle itself is tamper-evident. Producers (wrappers, auditd hook) write unsigned events to the spool via `layers/common/events.py`; the agent adds `key_id` and `signature`.
 ```json
 {
-  "event_id": "ev-0007", "layer": 1, "trigger": "wrapper:nano", "tamper_type": null,
+  "event_id": "ev-0007", "layer": 1, "trigger": "wrapper:nano", "tamper_type": null, "detail": { "cmd": "nano app.log", "mode": "deception" },
   "time": "...", "who": { "auid": 1001, "uid": 0, "process": "nano", "exe": "/opt/trip/bin/nano", "src_ip": "172.18.0.6" },
   "bundle_key": "bundles/ev-0007.json", "bundle_hash": "base64...",
   "state": "normal" | "alert" | "frozen",
@@ -117,6 +117,8 @@ Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so t
 // response
 { "status": "accepted" }
 ```
+`detail` is a free-form object (`cmd`, `mode`, `target`, and for deception the attempted `diff`). `state: "alert"` raises a `layer1_tripwire` alert and sets `/status` layer 1 to `tripped`; `state: "normal"` (e.g. a successful `coc-unlock`) is logged to `/timeline` only. Bad signature or unknown key: `{"status": "rejected", "reason": ...}` and a `forged` alert. `bundle_key`/`bundle_hash` are `null` until the vault exists (Step 7).
+
 `bundle_key` is the object name in the vault. The auditor view checks that the vault object's hash equals `bundle_hash` and that its signature is valid.
 
 ### Vault (MinIO, S3 API, not a witness route)

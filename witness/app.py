@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import Body, Depends, FastAPI, HTTPException
 
 from shared import export_public_key
-from witness import checks
+from witness import checks, events
 from witness.store import connect, get_state, init_db, set_state
 
 DEFAULT_LAYERS = Path(__file__).resolve().parents[1] / "config" / "layers.yaml"
@@ -114,6 +114,14 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     @app.post("/challenge/response")
     def post_challenge_response(body: dict = Body(...), conn=Depends(get_conn)):
         return checks.answer_challenge(conn, body, checks.now())
+
+    @app.post("/events")
+    def post_event(event: dict = Body(...), conn=Depends(get_conn)):
+        return events.submit_event(conn, event, checks.now())
+
+    @app.get("/timeline")
+    def get_timeline(since: float = 0, conn=Depends(get_conn)):
+        return {"events": events.timeline(conn, since)}
 
     @app.get("/status")
     def get_status(conn=Depends(get_conn)):

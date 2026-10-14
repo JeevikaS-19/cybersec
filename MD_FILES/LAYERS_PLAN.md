@@ -67,7 +67,7 @@ Every layer saves a copy. They all use this one module.
 
 **Build**
 - A wrapper directory placed first in `PATH` (for example `/opt/trip/bin`) with wrappers for: `nano`, `vi`, `vim`, `gedit`, `rm`, `mv`, `cp`, `sed`, `truncate`, `shred`, `cat` on log paths. `cd` is a shell builtin, so handle it with a shell function in the system-wide shell profile.
-- Each wrapper: emits a Layer 1 event, triggers an evidence bundle, sends an alert to the witness/dashboard, then blocks the action (does not run the real command).
+- Each wrapper: emits a Layer 1 event, triggers an evidence bundle, sends an alert to the witness/dashboard. **Deception mode** (default, `config/layers.yaml` → `layer1.mode`): editors open a decoy copy, so the real log is never touched; on save, the attempted diff goes to the witness as evidence. `rm`/`mv`/`cp`/`sed`/`truncate`/`shred` on a log report success and change nothing; `cat` shows the log (reading is harmless). `block` mode refuses instead. 
 - The team's custom command set, for example `coc-view`, `coc-status`, `coc-verify`, for legitimate read-only work.
 - **Revert key**: `coc-unlock` asks for a key, checks it against a stored hash (never the key itself), and if correct restores the original commands for that session only, and logs that it happened.
 

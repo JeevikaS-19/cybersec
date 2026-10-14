@@ -30,3 +30,8 @@
 - Jaganath's work (Docker, dashboard, full bank app) moves after the 3 PM round (Step 6).
 - Steps renumbered: 0 setup, 1 fake bank stub, 2 Checks A + B (2a shared, 2b agent, 2c witness), 3 Check C, 4 classifier, 5 terminal watcher, then 6 Docker, 7 vault, 8 to 9 Layer 1, 10 Layer 3, 11 dashboard additions, 12 demo. Phase 0 is a side task for the 3rd member.
 - Layer 2 runs natively (no Docker) before Round 1; Round 1 demo uses the terminal watcher.
+
+## Layer 1 build
+- Deception mode added (default): decoy editor, real log untouched, attempted diff captured as evidence. `block` mode kept as a switch.
+- Events path: producers write to a spool, the agent signs and sends `POST /events`; wrappers never hold the agent key. `/events` gains a `detail` field.
+- File commands trip only on log paths; editors always trip.

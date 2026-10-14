@@ -252,7 +252,11 @@ def status(conn, layers):
             "B": "red" if kinds & B_KINDS else "green",
             "C": "red" if kinds & C_KINDS else "green",
         },
-        "layers": {str(n): ("on" if layers.get(n) else "off") for n in (1, 2, 3)},
+        "layers": {
+            "1": ("tripped" if "layer1_tripwire" in kinds else "on") if layers.get(1) else "off",
+            "2": "on" if layers.get(2) else "off",
+            "3": "on" if layers.get(3) else "off",
+        },
         "state": "alert" if kinds else "normal",
         "last_entry_seq": last["seq"] if last else 0,
         "last_seen": hb.get("ts") or "",

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 import requests
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
+from layers.common import events as layer_events
 from shared import (
     GENESIS_PREV_HASH,
     export_public_key,
@@ -145,6 +146,21 @@ def send_pending(conn):
     return len(rows)
 
 
+def ship_events(conn, priv):
+    # Layer hook: sign spooled layer events with the agent key and send them (POST /events).
+    key_id = meta_get(conn, "key_id")
+    for path in layer_events.pending():
+        event = json.loads(path.read_text(encoding="utf-8"))
+        event["key_id"] = key_id
+        event["signature"] = sign_payload(priv, {k: v for k, v in event.items() if k != "signature"})
+        resp = requests.post(f"{WITNESS_URL}/events", json=event, timeout=TIMEOUT)
+        resp.raise_for_status()
+        if resp.json().get("status") == "accepted":
+            path.unlink()
+        else:
+            path.rename(path.with_suffix(".rejected"))
+
+
 def send_heartbeat(priv):
     timestamp = now_iso()
     body = {
@@ -223,6 +239,7 @@ def main():
                 last_heartbeat = now
             sync_bank(conn, priv)
             backlog = send_pending(conn) == SEND_BATCH
+            ship_events(conn, priv)
             if now - last_poll >= CHALLENGE_SECONDS:
                 answer_challenge(conn, priv)
                 last_poll = now

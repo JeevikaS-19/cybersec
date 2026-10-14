@@ -145,7 +145,7 @@ footer{padding:36px 0 56px;color:var(--muted);font-size:.9rem;border-top:1px sol
   <h3>Three layers</h3>
   <div class="grid">
     <div class="card"><span class="tag ok">Built</span><h3>Layer 2 · Heartbeat + checksum</h3><p>Detects tampering and names what kind. Checks A to C below.</p></div>
-    <div class="card"><span class="tag next">Next</span><h3>Layer 1 · Command tripwire</h3><p>Catches the intruder in the act: <code>nano app.log</code> is blocked and alerted, with auditd as the backstop.</p></div>
+    <div class="card"><span class="tag ok">Built</span><h3>Layer 1 · Command tripwire</h3><p>Catches the intruder in the act: <code>nano app.log</code> quietly opens a decoy. The real log is never touched, and the edit they tried is captured as evidence.</p></div>
     <div class="card"><span class="tag next">Planned</span><h3>Layer 3 · Break glass</h3><p>Last resort: capture evidence, isolate, freeze. Unlock needs 2 of 3 key holders. Never reboots.</p></div>
   </div>
 

@@ -4,7 +4,7 @@ Standalone scripts in `attacks/`, one file per attack (`a1_nano.py`, `a2_fullpat
 
 | # | Attack | How | Expected | Caught by | Self-test |
 |---|---|---|---|---|---|
-| A1 | Edit a log with a familiar command | `nano app.log` (also `vim`, `rm`, `sed`, `cat` on a log path) | Command blocked, Layer 1 event, bundle in auditor view | Layer 1 | T5a |
+| A1 | Edit a log with a familiar command | `nano app.log` (also `vim`, `rm`, `sed`, `cat` on a log path) | Layer 1 event; deception mode: intruder edits a decoy, real log untouched, attempted diff captured (block mode: refused) | Layer 1 | T5a |
 | A2 | Bypass the wrapper | `/usr/bin/nano app.log` or `\nano`, edit a record | auditd execve + dir watch → Layer 2 bundle with before / after / diff / who | Layer 1 backstop, Layer 2 | T5b, T6a |
 | A3 | Editor-style save | write a temp file in the log dir, then `mv` it over the log | Directory `-p wa` watch catches the rename | Layer 1 backstop | T5c |
 | A4 | Kill the agent | stop the agent process in `log-server` | Silence alert within 15 s, Layer 2 event | Check B | T2a |

@@ -8,3 +8,7 @@ checks:
   B: true
   C: true
   classifier: true
+
+layer1:
+  mode: deception        # deception = decoy editor, real log untouched, attempted diff captured; block = refuse
+  log_dir: /var/log/bank

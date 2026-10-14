@@ -20,3 +20,4 @@ __pycache__/
 .ruff_cache/
 # local tool settings
 .claude/settings.local.json
+coc-spool/
