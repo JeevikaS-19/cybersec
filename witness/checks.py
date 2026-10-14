@@ -88,7 +88,10 @@ def _replay_balances(conn, entry, now_ts):
         row = conn.execute("SELECT balance_paise FROM balances WHERE account = ?", (account,)).fetchone()
         if row is None and reported is None:
             with conn:
-                conn.execute("INSERT OR IGNORE INTO unseeded (account) VALUES (?)", (account,))
+                new = conn.execute("INSERT OR IGNORE INTO unseeded (account) VALUES (?)", (account,)).rowcount
+            if new:  # seed new accounts right away: the window before seeding is the only blind spot
+                queue = get_state(conn, "seed_queue") or []
+                set_state(conn, "seed_queue", [*queue, account])
             moved = get_state(conn, f"seedmove:{account}") or 0  # movement since a seed candidate was taken
             set_state(conn, f"seedmove:{account}", moved + delta)
             continue
@@ -193,6 +196,10 @@ def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
         if recheck and state_allowed and now_ts >= recheck["at"]:
             set_state(conn, "recheck", None)
             pending = {"type": "state", "account": recheck["account"]}
+        elif state_allowed and get_state(conn, "seed_queue"):
+            queue = get_state(conn, "seed_queue")
+            set_state(conn, "seed_queue", queue[1:])
+            pending = {"type": "state", "account": queue[0]}
         else:
             pending = records.due_sweep(conn, now_ts)  # a pending re-check never blocks other checks
         if pending is None and random.random() < CHALLENGE_CHANCE:

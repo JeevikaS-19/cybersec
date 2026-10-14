@@ -98,10 +98,11 @@ def answer(conn, pending, body, now_ts):
         replies = [(r.get("seq"), r.get("record")) for r in body.get("records") or [] if isinstance(r, dict)]
         if sorted(s for s, _ in replies) != sorted(pending["seqs"]):
             return None
+    known = {r["seq"] for r in conn.execute("SELECT seq FROM mismatches")}
     bad = [seq for seq, rec in replies if compare(conn, seq, rec, now_ts, f"{what} ({pending['id']})")]
     if bad:
-        if not pending.get("full"):
-            set_state(conn, "full_sweep", True)  # list every tampered record, not just the first
+        if not pending.get("full") and set(bad) - known:
+            set_state(conn, "full_sweep", True)  # a NEW tampered record: list every one, once
         log_activity(conn, "challenge_failed", f"{pending['id']} {what}: tampered " +
                      ", ".join(f"#{s}" for s in bad[:10]) + (" ..." if len(bad) > 10 else ""), now_ts)
         return {"status": "mismatch"}
