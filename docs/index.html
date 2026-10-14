@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chain of Custody</title>
+<meta name="description" content="Tamper-evident bank logs: signed hash chain, outside witness, truth check. Setup and demo guide.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f8fb;--surface:#ffffff;--surface-2:#eef1f6;--text:#0f172a;--muted:#5b6478;--border:#dde2ea;
+  --accent:#0f766e;--accent-soft:#ccfbf1;--red:#dc2626;--red-soft:#fee2e2;--green:#16a34a;--green-soft:#dcfce7;
+  --amber:#b45309;--amber-soft:#fef3c7;--code-bg:#0f172a;--code-text:#e2e8f0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0b1020;--surface:#121a2e;--surface-2:#18223a;--text:#e6eaf2;--muted:#94a0b8;--border:#24304a;
+    --accent:#2dd4bf;--accent-soft:#0f3b38;--red:#f87171;--red-soft:#3b1717;--green:#4ade80;--green-soft:#123321;
+    --amber:#fbbf24;--amber-soft:#3a2a0a;--code-bg:#070b16;--code-text:#e2e8f0;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b1020;--surface:#121a2e;--surface-2:#18223a;--text:#e6eaf2;--muted:#94a0b8;--border:#24304a;
+  --accent:#2dd4bf;--accent-soft:#0f3b38;--red:#f87171;--red-soft:#3b1717;--green:#4ade80;--green-soft:#123321;
+  --amber:#fbbf24;--amber-soft:#3a2a0a;--code-bg:#070b16;--code-text:#e2e8f0;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+code,pre{font-family:"JetBrains Mono",ui-monospace,monospace}
+code{font-size:.88em;background:var(--surface-2);padding:.1em .35em;border-radius:5px}
+.wrap{max-width:1040px;margin:0 auto;padding:0 16px}
+nav{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+nav .wrap{display:flex;align-items:center;gap:20px;height:56px}
+.brand{font-weight:800;letter-spacing:-.02em;color:var(--text);text-decoration:none;display:flex;gap:8px;align-items:center}
+.brand span{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-soft)}
+nav .links{display:flex;gap:18px;margin-left:auto;font-size:.92rem}
+nav .links a{color:var(--muted);text-decoration:none}
+nav .links a:hover{color:var(--text)}
+@media (max-width:720px){nav .links{display:none}}
+header{padding:72px 0 48px}
+.eyebrow{font-size:.8rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+h1{font-size:clamp(2rem,5vw,3.3rem);line-height:1.1;letter-spacing:-.03em;margin:.3em 0 .4em;font-weight:800}
+.lead{font-size:1.15rem;color:var(--muted);max-width:680px}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+.btn{display:inline-block;padding:11px 18px;border-radius:10px;font-weight:600;text-decoration:none;border:1px solid var(--border);color:var(--text);background:var(--surface)}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+section{padding:48px 0;border-top:1px solid var(--border)}
+h2{font-size:1.7rem;letter-spacing:-.02em;margin:0 0 .3em}
+h3{margin:1.4em 0 .4em;font-size:1.1rem}
+.sub{color:var(--muted);margin:0 0 24px;max-width:720px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px}
+.card h3{margin-top:0}
+.tag{display:inline-block;font-size:.75rem;font-weight:600;padding:3px 9px;border-radius:999px;margin-bottom:10px}
+.tag.ok{background:var(--green-soft);color:var(--green)}
+.tag.next{background:var(--amber-soft);color:var(--amber)}
+.card p{margin:.3em 0;color:var(--muted)}
+.statusbox{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;font-family:"JetBrains Mono",monospace;font-size:.9rem;max-width:520px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
+.pill{font-size:.75rem;font-weight:700;padding:3px 10px;border-radius:999px}
+.pill.g{background:var(--green-soft);color:var(--green)}
+.pill.r{background:var(--red-soft);color:var(--red)}
+.alertline{margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--red-soft);color:var(--red);font-size:.82rem}
+.diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;overflow:hidden}
+.diagram svg{width:100%;height:auto;display:block}
+.tbl{width:100%;border-collapse:collapse;font-size:.94rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.tbl th,.tbl td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+.tbl th{background:var(--surface-2);font-weight:600;font-size:.85rem}
+.tbl tr:last-child td{border-bottom:0}
+.tblwrap{overflow-x:auto}
+.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+.steps>li{counter-increment:s;position:relative;padding-left:46px;margin-bottom:22px}
+.steps>li::before{content:counter(s);position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700;display:grid;place-items:center;font-size:.9rem}
+.code{position:relative;margin:10px 0}
+.code pre{margin:0;background:var(--code-bg);color:var(--code-text);padding:14px 16px;border-radius:10px;overflow-x:auto;font-size:.86rem;line-height:1.55}
+.code pre .c{color:#7d8aa5}
+.copy{position:absolute;top:8px;right:8px;font:600 .72rem Inter,sans-serif;padding:4px 9px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#cbd5e1;cursor:pointer}
+.tabs{display:flex;gap:6px;margin-bottom:6px}
+.tabs button{font:600 .82rem Inter,sans-serif;padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.tabpanel[hidden]{display:none}
+.note{background:var(--amber-soft);color:var(--text);border-left:3px solid var(--amber);padding:10px 14px;border-radius:8px;font-size:.92rem}
+footer{padding:36px 0 56px;color:var(--muted);font-size:.9rem;border-top:1px solid var(--border)}
+.themebtn{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;padding:5px 9px;cursor:pointer;font-size:.85rem}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="brand" href="#top"><span></span>Chain of Custody</a>
+  <div class="links"><a href="#how">How it works</a><a href="#setup">Setup</a><a href="#demo">Demo</a><a href="#integrate">Integrate</a><a href="#api">API</a></div>
+  <button class="themebtn" id="theme" aria-label="Toggle theme">◐</button>
+</div></nav>
+
+<header id="top"><div class="wrap">
+  <div class="eyebrow">Hackurity 2026 · PS-6 · Team Firewall Crew</div>
+  <h1>Logs that prove they weren't changed.</h1>
+  <p class="lead">An insider with admin access can edit a balance and then edit the logs to hide it. Chain of Custody moves the proof <strong>off the machine</strong>: every entry is signed, chained and checked by an outside witness the attacker can't reach. Tampering is <strong>detected and provable</strong>, and every alert says <strong>what kind</strong> of tampering happened.</p>
+  <div class="cta">
+    <a class="btn primary" href="#setup">Set it up in 5 minutes</a>
+    <a class="btn" href="https://github.com/JeevikaS-19/cybersec">View on GitHub</a>
+  </div>
+</div></header>
+
+<section id="how"><div class="wrap">
+  <h2>How it works</h2>
+  <p class="sub">The agent sits next to the bank and signs every transaction into a hash chain. The witness runs on a separate server, holds only the agent's public key, and keeps checking.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 860 260" role="img" aria-label="Bank and agent on the log server send signed entries to a separate witness, which serves the SOC view">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <g style="color:var(--muted)" fill="none" stroke="currentColor">
+        <rect x="10" y="20" width="380" height="220" rx="16" stroke-dasharray="6 5"/>
+      </g>
+      <text x="30" y="48" fill="var(--red)" font-size="13" font-weight="600" font-family="Inter">Log server · attacker may have root</text>
+      <g font-family="Inter" font-size="14">
+        <rect x="40" y="90" width="140" height="80" rx="12" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="110" y="125" text-anchor="middle" fill="var(--text)" font-weight="700">Bank app</text>
+        <text x="110" y="148" text-anchor="middle" fill="var(--muted)" font-size="12">bank.db</text>
+        <rect x="220" y="90" width="150" height="80" rx="12" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="295" y="125" text-anchor="middle" fill="var(--text)" font-weight="700">Agent</text>
+        <text x="295" y="148" text-anchor="middle" fill="var(--muted)" font-size="12">signs + chains</text>
+        <rect x="500" y="80" width="170" height="100" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="585" y="120" text-anchor="middle" fill="var(--text)" font-weight="700">Witness</text>
+        <text x="585" y="142" text-anchor="middle" fill="var(--muted)" font-size="12">separate server</text>
+        <text x="585" y="160" text-anchor="middle" fill="var(--muted)" font-size="12">public key only</text>
+        <rect x="720" y="95" width="125" height="70" rx="12" fill="var(--surface-2)" stroke="var(--border)"/>
+        <text x="782" y="127" text-anchor="middle" fill="var(--text)" font-weight="700">SOC view</text>
+        <text x="782" y="147" text-anchor="middle" fill="var(--muted)" font-size="12">/status · /alerts</text>
+      </g>
+      <g style="color:var(--muted)" stroke="currentColor" stroke-width="1.6" fill="none">
+        <path d="M180 130H216" marker-end="url(#ar)"/>
+        <path d="M370 112H496" marker-end="url(#ar)"/>
+        <path d="M500 150H374" marker-end="url(#ar)"/>
+        <path d="M670 130H716" marker-end="url(#ar)"/>
+      </g>
+      <g font-family="Inter" font-size="11.5" fill="var(--muted)" text-anchor="middle">
+        <text x="433" y="92">signed entries</text><text x="433" y="106">heartbeat every 5 s</text>
+        <text x="433" y="172">hash + state challenges</text>
+      </g>
+    </svg>
+  </div>
+
+  <h3>Three layers</h3>
+  <div class="grid">
+    <div class="card"><span class="tag ok">Built</span><h3>Layer 2 · Heartbeat + checksum</h3><p>Detects tampering and names what kind. Checks A to C below.</p></div>
+    <div class="card"><span class="tag next">Next</span><h3>Layer 1 · Command tripwire</h3><p>Catches the intruder in the act: <code>nano app.log</code> is blocked and alerted, with auditd as the backstop.</p></div>
+    <div class="card"><span class="tag next">Planned</span><h3>Layer 3 · Break glass</h3><p>Last resort: capture evidence, isolate, freeze. Unlock needs 2 of 3 key holders. Never reboots.</p></div>
+  </div>
+
+  <h3>Layer 2 checks</h3>
+  <div class="grid">
+    <div class="card"><h3>A · Sealed chain</h3><p><strong>Was anything changed?</strong> Each entry is SHA-256 hashed, linked to the previous one and signed with Ed25519. The witness re-hashes everything it holds every 5 s.</p></div>
+    <div class="card"><h3>B · Outside witness</h3><p><strong>Is the agent alive and honest?</strong> Signed heartbeat every 5 s, silence alert after 15 s, random hash challenges, timestamps that only move forward.</p></div>
+    <div class="card"><h3>C · Truth check</h3><p><strong>Does the log match reality?</strong> The witness replays every balance and asks for real balances at random. It catches a database edit with <em>no</em> log entry, which a hash chain alone never sees.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>What the SOC sees</h2>
+  <p class="sub">Every alert carries a <code>tamper_type</code>, so an analyst knows what happened, not just that something did.</p>
+  <div class="grid" style="align-items:start">
+    <div class="statusbox" aria-label="Example status after a database edit">
+      <div class="row"><span>Check A · sealed chain</span><span class="pill g">GREEN</span></div>
+      <div class="row"><span>Check B · outside witness</span><span class="pill g">GREEN</span></div>
+      <div class="row"><span>Check C · truth check</span><span class="pill r">RED</span></div>
+      <div class="alertline">ALERT db_edited_without_log · acc-1 bank balance differs from witness replay</div>
+    </div>
+    <div class="tblwrap"><table class="tbl">
+      <tr><th>tamper_type</th><th>Meaning</th></tr>
+      <tr><td><code>entry_edited</code></td><td>Stored entry no longer matches its hash</td></tr>
+      <tr><td><code>entry_deleted</code></td><td>A <code>seq</code> gap: an entry is missing</td></tr>
+      <tr><td><code>entries_reordered</code></td><td>Out of order, links swapped</td></tr>
+      <tr><td><code>entry_replayed</code></td><td>Same entry or heartbeat sent twice</td></tr>
+      <tr><td><code>entry_inserted</code></td><td>Extra entry that doesn't fit the chain</td></tr>
+      <tr><td><code>backdated</code></td><td>Timestamp earlier than the last accepted</td></tr>
+      <tr><td><code>forged</code></td><td>Bad signature or unknown key</td></tr>
+      <tr><td><code>agent_silenced</code></td><td>No heartbeat, or a challenge went unanswered</td></tr>
+      <tr><td><code>balance_misreported</code></td><td>Reported balance differs from the witness's replay</td></tr>
+      <tr><td><code>db_edited_without_log</code></td><td>Bank's real balance differs while the chain stays green</td></tr>
+    </table></div>
+  </div>
+</div></section>
+
+<section id="setup"><div class="wrap">
+  <h2>Setup</h2>
+  <p class="sub">One laptop, no Docker, Python 3.11 or newer.</p>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="win">Windows</button>
+    <button role="tab" aria-selected="false" data-tab="nix">macOS / Linux</button>
+  </div>
+  <ol class="steps">
+    <li><strong>Get the code and install</strong>
+      <div class="tabpanel" data-panel="win"><div class="code"><pre>git clone https://github.com/JeevikaS-19/cybersec.git
+cd cybersec
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt</pre></div></div>
+      <div class="tabpanel" data-panel="nix" hidden><div class="code"><pre>git clone https://github.com/JeevikaS-19/cybersec.git
+cd cybersec
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt</pre></div></div>
+    </li>
+    <li><strong>Start the witness</strong> (terminal 1)
+      <div class="code"><pre>python -m uvicorn --factory witness.app:create_app --port 8000</pre></div></li>
+    <li><strong>Start the fake bank</strong> (terminal 2): one transfer per second into <code>bank.db</code>
+      <div class="code"><pre>python victim/bank.py</pre></div></li>
+    <li><strong>Start the agent</strong> (terminal 3): reads <code>bank.db</code>, signs, sends to the witness
+      <div class="code"><pre>python agent/agent.py</pre></div></li>
+    <li><strong>Check it's healthy</strong>: all three checks green, no alerts
+      <div class="code"><pre>curl http://127.0.0.1:8000/status
+curl http://127.0.0.1:8000/alerts</pre></div></li>
+  </ol>
+
+  <h3>Witness on a separate server</h3>
+  <p>The witness belongs outside the log server. On the second machine, start it with <code>--host 0.0.0.0</code> and allow port 8000 through the firewall. On the log server, point the agent at it before starting:</p>
+  <div class="tabpanel" data-panel="win"><div class="code"><pre>$env:WITNESS_URL="http://&lt;witness-ip&gt;:8000"
+python agent/agent.py</pre></div></div>
+  <div class="tabpanel" data-panel="nix" hidden><div class="code"><pre>export WITNESS_URL=http://&lt;witness-ip&gt;:8000
+python agent/agent.py</pre></div></div>
+</div></section>
+
+<section id="demo"><div class="wrap">
+  <h2>Demo: attack it</h2>
+  <p class="sub">With everything green, play the attacker. Each attack turns a specific check red and names the tamper type.</p>
+  <div class="tblwrap"><table class="tbl">
+    <tr><th>Attack</th><th>Do this</th><th>You'll see</th></tr>
+    <tr><td>Kill the agent</td><td>Stop terminal 3 (Ctrl+C)</td><td>Check B red, <code>agent_silenced</code> within ~15 s</td></tr>
+    <tr><td>Edit a balance, no log</td><td><code>sqlite3 bank.db "UPDATE accounts SET balance_paise = balance_paise + 1000000 WHERE account_id='acc-1'"</code></td><td>Check C red, A and B stay green</td></tr>
+    <tr><td>Edit a stored entry (A7)</td><td>Run the A7 attack script: changes one field of a stored entry</td><td>Check A red within 5 s, <code>entry_edited</code></td></tr>
+  </table></div>
+  <p class="note" style="margin-top:16px">For a snappier live demo, set the env var <code>CHALLENGE_CHANCE=1.0</code> before starting the witness so it challenges on every poll.</p>
+</div></section>
+
+<section id="integrate"><div class="wrap">
+  <h2>Plug in another platform</h2>
+  <p class="sub">The agent is a small sidecar. A platform plugs in by giving it transactions and balances; nothing in the platform itself changes.</p>
+  <ol class="steps">
+    <li><strong>Map your transactions.</strong> Set <code>BANK_DB_PATH</code> and map your rows to the entry fields in <code>agent/agent.py</code> (<code>sync_bank</code>): <code>txn_id</code>, <code>timestamp</code>, <code>from_account</code>, <code>to_account</code>, <code>amount_paise</code>, and the balances after the transaction, <code>from_balance_paise</code> and <code>to_balance_paise</code>. Amounts are integer paise, never floats.</li>
+    <li><strong>Answer balance questions.</strong> For Check C, the agent reads an account's real balance from your system (<code>bank_balance_at</code>).</li>
+    <li><strong>Give it an identity.</strong> Set <code>PLATFORM_ID</code>. The agent makes its own Ed25519 key, registers the public key with the witness and keeps the private key local. It is never sent or printed.</li>
+    <li><strong>Point it at the witness.</strong> Set <code>WITNESS_URL</code>. Each platform gets its own independent chain, so one witness serves many platforms.</li>
+  </ol>
+  <div class="tblwrap"><table class="tbl">
+    <tr><th>Env var</th><th>Used by</th><th>Default</th></tr>
+    <tr><td><code>WITNESS_URL</code></td><td>agent</td><td><code>http://127.0.0.1:8000</code></td></tr>
+    <tr><td><code>BANK_DB_PATH</code></td><td>bank, agent</td><td><code>bank.db</code></td></tr>
+    <tr><td><code>AGENT_DB_PATH</code></td><td>agent (local copy of every entry)</td><td><code>agent_state.db</code></td></tr>
+    <tr><td><code>PLATFORM_ID</code></td><td>agent</td><td><code>log-server-1</code></td></tr>
+    <tr><td><code>WITNESS_DB_PATH</code></td><td>witness</td><td><code>witness.db</code></td></tr>
+  </table></div>
+  <p>Every check and layer is a switch in <code>config/layers.yaml</code>: start with detection only, turn on response layers as trust grows.</p>
+</div></section>
+
+<section id="api"><div class="wrap">
+  <h2>Witness API</h2>
+  <div class="tblwrap"><table class="tbl">
+    <tr><th>Route</th><th>Purpose</th></tr>
+    <tr><td><code>POST /register/agent</code></td><td>Register a platform's public key, returns <code>key_id</code></td></tr>
+    <tr><td><code>POST /entries</code></td><td>Submit a signed, chained entry</td></tr>
+    <tr><td><code>POST /heartbeat</code></td><td>Signed heartbeat every 5 s</td></tr>
+    <tr><td><code>GET /challenge/poll</code> · <code>POST /challenge/response</code></td><td>Hash and state challenges</td></tr>
+    <tr><td><code>GET /status</code></td><td>Checks A to C, layers, state (normal / alert / frozen)</td></tr>
+    <tr><td><code>GET /alerts</code></td><td>Every alert with its <code>tamper_type</code></td></tr>
+    <tr><td><code>GET /verify?from_seq=&amp;to_seq=</code></td><td>Re-verify a range of the chain</td></tr>
+  </table></div>
+
+  <h3>Honest limits</h3>
+  <ul>
+    <li>The witness learns each account's opening balance from the first entry it sees, so setup must happen on a clean system.</li>
+    <li>An attacker who steals the agent's key can keep signing heartbeats; Check C still catches balance changes.</li>
+    <li>If the network is cut, the witness sees the silence; the agent queues entries and resends them with the same <code>seq</code>.</li>
+  </ul>
+  <h3>Roadmap</h3>
+  <p>Docker compose with a no-SSH witness container · write-once evidence vault (MinIO object lock) · Layer 1 tripwire with auditd · Layer 3 break glass with Shamir 2-of-3 unlock · SOC and auditor dashboard.</p>
+</div></section>
+
+<footer><div class="wrap">Chain of Custody · Team Firewall Crew · Hackurity 2026. Tampering is detected and provable.</div></footer>
+
+<script>
+document.querySelectorAll(".code").forEach(function (box) {
+  var b = document.createElement("button");
+  b.className = "copy"; b.textContent = "Copy";
+  b.addEventListener("click", function () {
+    navigator.clipboard.writeText(box.querySelector("pre").innerText).then(function () {
+      b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1200);
+    });
+  });
+  box.appendChild(b);
+});
+function setTab(name) {
+  document.querySelectorAll(".tabs button").forEach(function (t) { t.setAttribute("aria-selected", t.dataset.tab === name); });
+  document.querySelectorAll(".tabpanel").forEach(function (p) { p.hidden = p.dataset.panel !== name; });
+  try { localStorage.setItem("coc-os", name); } catch (e) {}
+}
+document.querySelectorAll(".tabs button").forEach(function (t) { t.addEventListener("click", function () { setTab(t.dataset.tab); }); });
+try { var saved = localStorage.getItem("coc-os"); } catch (e) {}
+setTab(saved || (/Win/.test(navigator.platform) ? "win" : "nix"));
+document.getElementById("theme").addEventListener("click", function () {
+  var root = document.documentElement;
+  var dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+});
+</script>
+</body>
+</html>
