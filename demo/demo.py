@@ -5,6 +5,8 @@
 Everything runs from demo/.run/ (wiped on start and on reset). Layer 1 attacks run in WSL Ubuntu.
 """
 
+import io
+import json
 import os
 import shutil
 import socket
@@ -14,11 +16,13 @@ import sys
 import threading
 import time
 import webbrowser
+from contextlib import redirect_stdout
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 RUN = REPO / "demo" / ".run"
-WITNESS_PORT, CABLE_PORT = 8000, 8001
+WITNESS_PORT, CABLE_PORT, CONTROL_PORT = 8000, 8001, 8002
 PROFILE_ID = "bank-demo-7f3a9c"  # the team's demo profile-id (stored as a hash only)
 WSL_DISTRO = os.environ.get("COC_WSL_DISTRO", "Ubuntu-24.04")
 
@@ -171,6 +175,44 @@ MENU = """
 """
 
 
+def serve_controls(actions):
+    """Demo buttons on the auditor page POST here (localhost only)."""
+    lock = threading.Lock()
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, body):
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_OPTIONS(self):
+            self._send(204, {})
+
+        def do_GET(self):
+            self._send(200, {"demo": True})
+
+        def do_POST(self):
+            key = self.path.rsplit("/", 1)[-1]
+            if key not in actions:
+                return self._send(404, {"error": "unknown action"})
+            out = io.StringIO()
+            with lock, redirect_stdout(out):
+                actions[key]()
+            return self._send(200, {"message": out.getvalue().strip()})
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", CONTROL_PORT), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
 def main():
     demo = Demo()
     demo.start()
@@ -183,13 +225,15 @@ def main():
         "6": lambda: (demo.cable.plug(), print("  Network back. Server reports in and stays locked until 2 approvals.")),
         "r": demo.start,
     }
+    serve_controls(actions)
     try:
         while True:
             print(MENU)
             try:
                 choice = input("  > ").strip().lower()
-            except EOFError:
-                break
+            except EOFError:  # started without a terminal: keep running for the page's demo buttons
+                while True:
+                    time.sleep(3600)
             if choice == "q":
                 break
             if choice in actions:
