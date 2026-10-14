@@ -1,0 +1,10 @@
+[Unit]
+Description=Chain of Custody Layer 1 backstop (writes that bypass the tripwire)
+
+[Service]
+EnvironmentFile=/etc/coc/coc.env
+ExecStart=/opt/coc/venv/bin/python -u -m layers.l1_tripwire.backstop run
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

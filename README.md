@@ -82,6 +82,8 @@ The agent is a sidecar; the platform's code doesn't change. Everything is set in
 | Quarantine time, lockout/site-down commands, key holders | `layer3` (`dry_run: false` on a real server) |
 | Install the tripwire | `sudo sh layers/l1_tripwire/install.sh` |
 
+**Install on a real log server** (root, systemd): `sudo WITNESS_URL=https://<witness>:8000 COC_PLATFORM_CONFIG=/opt/coc/config/platform.team-bank.yaml COC_DB_DSN=... bash deploy/install-log-server.sh`, then `python3 -m layers.l1_tripwire.profiles add <platform>`. Run the witness on a separate machine with `docker/witness.Dockerfile`.
+
 Run the pieces yourself: `python -m uvicorn --factory witness.app:create_app --port 8000` (witness), `python agent/agent.py` (agent, on the log server).
 
 ## Witness API

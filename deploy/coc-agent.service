@@ -1,0 +1,12 @@
+[Unit]
+Description=Chain of Custody agent (seals platform records, heartbeats, Layer 3 quarantine)
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/coc/coc.env
+ExecStart=/opt/coc/venv/bin/python -u /opt/coc/agent/agent.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

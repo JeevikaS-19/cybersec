@@ -42,58 +42,55 @@ Run `python demo/demo.py`; the auditor view opens at http://127.0.0.1:8000/. The
 ---
 
 ## Final · Day 2, 10:00 AM · Product
-**Slides (7 min) + demo (4 min)**
-1. Hook  2. Problem  3. Detect / Respond / Prove  4. **Live demo**  5. Innovation  6. Scalability  7. Product ready  8. Honest limits + roadmap  9. Who it's for
+**Slides (7 min) + demo (5 min)**
+1. Hook  2. Problem  3. Three layers  4. **Live demo**  5. Innovation  6. Scalability  7. Product ready  8. Honest limits + roadmap  9. Who it's for
 
-**Live demo (follows `docs/demo_script.md`)**
-1. Normal operation: logs streaming, heartbeats green.
-2. **Layer 2:** edit an entry and edit a DB balance → each alert names the tamper type.
-3. Stolen admin creds, `nano app.log` → **Layer 1 trips**; `/usr/bin/nano` edit → auditd + Layer 2, before / after / diff / who.
-4. Delete the evidence in the vault → denied by object lock.
-5. Attacker locks the admin out → **Layer 3 fires**, system FROZEN, attacker's session killed too.
-6. Two key holders enter shares in the dashboard → unlocks; every step is in the evidence trail.
-7. Show the witness has no SSH (port 22 closed).
+**Live demo (Docker: three real servers).** Before: `python docker/ctl.py reset`, open http://127.0.0.1:8000/, have `python docker/ctl.py shares` output for two "key holders". Backup: the page's **Preview** switch (Normal / Layer 1 / Layer 2 / Layer 3) works with no server at all.
+1. **Normal:** all green; heartbeat monitor asks for `#N` records and they match. "The witness is a separate server with no SSH; the bank never shows an alert."
+2. **Layer 1:** `ctl.py admin` (allowed, logged) then `ctl.py intruder`: stolen password over SSH, `vim` + `rm` on the log → red rows with user + source IP, rule broken, the edit they *tried*; real log untouched.
+3. **Layer 1 backstop:** the attacker uses `/usr/bin/vim.tiny` by full path → `backstop:write`, attributed. "Wrappers are the tripwire; the backstop is the lock."
+4. **Layer 2:** `ctl.py tamper-record` → **Record #N** expected vs found in red within ~15 s; `ctl.py tamper-balance` → Check C.
+5. **Layer 3:** `ctl.py cut` → heartbeat flat → 45 s → "Banking server has quarantined itself": everyone incl. root logged out and locked, SSH keys refused, bank paused, evidence append-only. `ctl.py restore` → server reports the records it sealed during the cut, stays locked → two holders paste shares → unlocked.
 
 ### Innovation talking points
-- **Truth check (Check C):** catches a direct DB edit with no log entry, which a hash chain alone never sees.
-- **Tripwire on habits:** the team never types `nano` on this box; an intruder always does.
-- **Break glass with 2-of-3 keys:** the attacker's lockout move freezes them out too; no single person (not even the admin) can unlock.
-- **Evidence that outlives the attacker:** write-once vault + witness-held hashes.
+- **Record checks from outside:** the witness asks for record `#42` and compares the bank's row *now* with the sealed copy, field by field: edits made straight in the database are caught, not just log edits.
+- **Truth check (Check C):** a balance changed with no transaction is caught even when every record looks fine.
+- **Deception tripwire:** the team uses `<cmd> --<profile-id>`; an intruder's habitual `vim` edits a decoy, and we capture what they tried to change.
+- **Quarantine on network cut:** cutting the network to work unseen is itself the trigger; the server locks everyone out (root too) and keeps sealing records offline.
+- **Shamir 2-of-3 unlock:** even a hacked witness can't unlock; the server checks the rebuilt secret against a hash it got at setup.
 
 ### Scalability talking points
-- **One agent image, any platform:** a sidecar container; a platform plugs in by mapping its log fields.
-- **Witness scales out:** each platform's chain is independent.
-- **Vault is standard S3 with object lock:** swap MinIO for any S3-compatible store with compliance mode.
-- **Each layer is a config switch:** start with detection only, turn on response layers as trust grows.
+- **Latches onto any platform by config:** `config/platform.yaml` maps tables, columns and units (SQLite or PostgreSQL; tested on a PostgreSQL bank shaped like the team's app with concurrent, out-of-order commits).
+- **Witness scales out:** each platform registers its own key and chain.
+- **Each layer is a config switch** (`config/layers.yaml`): start with detection, turn on response layers as trust grows.
 
 ### Product-ready talking points
-- **One command up:** `docker compose up`.
-- **Two users, two jobs:** SOC sees the live timeline and can hit panic; auditor verifies bundles and holds an unlock share.
-- **Roles:** no one, not even admins, can edit or delete entries or vault evidence. Every action is itself logged.
-- **Compliance fit:** CERT-In 2022 directions (log retention), RBI cybersecurity framework, PCI DSS Requirement 10 (audit logs), SEC 17a-4-style write-once storage.
+- **One command up:** `python docker/ctl.py up`; production install: `deploy/install-log-server.sh` + systemd services; builds work offline.
+- **Nothing hardcoded:** commands, paths, timings, thresholds, lockout commands, key holders: all config.
+- **Tested:** 56 automated tests, 10,000-transaction clean run with zero false alarms, real lockout proven as root in a container (18/18).
+- **Compliance fit:** CERT-In 2022 directions (log retention), RBI cybersecurity framework, PCI DSS Requirement 10 (audit logs).
 
 ### Honest limits (say them, judges respect it)
-- **Wrappers are bypassable** (full path, another shell). That's why they're detection only; auditd is the enforcement.
-- **Docker shares the WSL2 kernel:** Phase 0 results decide which features ran natively and which used fallbacks. Say which.
-- **An attacker with root can try to kill the break-glass controller first.** The witness sees missed heartbeats, and the vault already holds everything streamed up to that point.
-- **Network cut before a bundle is pushed:** the witness sees the silence, but that bundle is lost. Local encrypted buffer is on the roadmap.
-- **An attacker who steals the agent's key can keep signing heartbeats.** Check C and Layer 1/2 events still catch their actions.
-- **Unlock shares pass through the witness** to reconstruct the secret. In production, use a threshold scheme where no single party sees the whole secret.
-- **Genesis must happen on a clean system.** Future: hardware attestation (TPM).
+- **Wrappers are bypassable** (full path, another tool). That's why there's a backstop. auditd is host-only, so inside containers the backstop uses inotify + /proc; a writer that exits within milliseconds is caught but can't always be named.
+- **Root can try to kill the agent first.** The witness flags silence within 15 s and treats 45 s as quarantine; everything sealed before that is already outside.
+- **An attacker who steals the agent's key can keep sending heartbeats.** Record checks and Check C still catch changes to the bank's data.
+- **Unlock shares pass through the witness** to rebuild the secret; re-issue shares after every unlock.
+- **Genesis must happen on a clean system**, and Check C learns each starting balance once. Future: hardware attestation (TPM).
+- **Whoever controls the hypervisor/console can always get in.**
 
 ---
 
 ## Judge questions to rehearse
 | Question | Answer |
 |---|---|
-| Can't the attacker just use `/usr/bin/nano`? | Yes, and auditd catches it by exec rule and directory watch. Wrappers are the tripwire, auditd is the lock. |
-| Isn't locking everyone out a denial of service? | It's an emergency brake for one trigger: the admin being locked out. Two of three key holders restore service in minutes, and the evidence is safe. |
-| Why not just reboot? | A reboot wipes live evidence (processes, connections) and unloads auditd rules. We capture first, then freeze. |
-| What if the attacker kills auditd or the agent? | Stopping auditd is itself an audit event, and the witness sees missed heartbeats within 15 s. |
-| What if root changes data without writing a log? | Check C: the state challenge compares the bank's real balance with our replay. |
-| What if the witness is hacked? | The vault still holds every log line and bundle under object lock; bundle hashes and the vault disagree with any rewrite. |
-| Why not just use blockchain? | Object-locked storage plus a signed hash chain gives the same tamper-evidence, faster and cheaper. |
-| How does this scale? | Scalability slide. |
+| Can't the attacker just use `/usr/bin/nano`? | Yes, and the backstop catches the write and names who did it. Wrappers are the tripwire, the backstop is the lock. |
+| Isn't locking everyone out a denial of service? | It fires on one signal: the server losing its witness. Two of three key holders restore it in minutes, and nothing is lost: records keep being sealed offline. |
+| Why not just reboot? | A reboot wipes live evidence (processes, connections). We capture first, then lock. |
+| What if the attacker kills the agent? | The witness sees missed heartbeats within 15 s; everything already sealed is outside the server. |
+| What if root changes data without writing a log? | Record checks compare the row now with the sealed copy; Check C compares real balances with our replay. |
+| What if the witness is hacked? | It holds public keys only, so it can't forge records; it can't unlock without two Shamir shares. |
+| Why not blockchain? | A signed hash chain checked by an outside witness gives the same tamper-evidence, faster and cheaper. |
+| How does it attach to our bank? | One config file maps your tables; your code doesn't change. |
 
 ## Demo rules
 - Same attack order every rehearsal.
