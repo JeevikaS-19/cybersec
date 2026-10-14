@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 User=custody-witness
-Environment=PYTHONPATH=/opt/custody-witness WITNESS_DB_PATH=/var/lib/custody-witness/witness.db
+Environment=PYTHONPATH=/opt/custody-witness WITNESS_DB_PATH=/var/lib/custody-witness/witness.db WITNESS_PATH_PREFIX={{PREFIX}}
 ExecStart=/opt/custody-witness/venv/bin/python -m uvicorn --factory witness.app:create_app --host 127.0.0.1 --port {{PORT}}
 Restart=always
 MemoryMax=200M

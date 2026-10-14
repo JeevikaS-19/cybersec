@@ -91,3 +91,17 @@ def test_status_reports_connection_and_verified_records(witness):
     s = requests.get(f"{witness.url}/status", timeout=5).json()
     assert s["connection"] == "connected" and s["platform_id"] == "log-server-1"
     assert s["records_verified"] == 2 and s["last_verified"] == {"seq": 2, "time": ts(2)}
+
+
+def test_witness_under_a_path_prefix(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from witness import app as app_mod
+
+    monkeypatch.setattr(app_mod, "PREFIX", "/custody")
+    with TestClient(app_mod.create_app(str(tmp_path / "w.db"))) as c:
+        assert c.get("/custody/status").json()["connection"] == "waiting"
+        r = c.get("/custody", follow_redirects=False)
+        assert r.status_code in (302, 307) and r.headers["location"] == "/custody/"
+        assert "auditor view" in c.get("/custody/").text
+        assert c.get("/status").status_code == 404  # nothing outside the prefix

@@ -239,7 +239,7 @@ $("main").addEventListener("click", async (e) => {
   if (mode !== "live") { approvals.add(Number(b.dataset.holder)); buildPreview(mode); renderAll(); return; }
   const inp = $("share" + b.dataset.holder);
   try {
-    const r = await (await fetch("/quarantine/approve", { method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await (await fetch("quarantine/approve", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ holder: Number(b.dataset.holder), share: inp ? inp.value : null }) })).json();
     if (r.status !== "ok") { b.disabled = false; if (inp) { inp.value = ""; inp.placeholder = r.reason || "rejected"; } }
   } catch (err) { b.disabled = false; }
@@ -320,7 +320,7 @@ function renderAll() {
 async function poll() {
   if (mode !== "live") return;
   try {
-    const [s, a, ev, mm, act] = await Promise.all([j("/status"), j("/alerts"), j("/timeline"), j("/mismatches"), j("/activity?since_id=" + lastAct)]);
+    const [s, a, ev, mm, act] = await Promise.all([j("status"), j("alerts"), j("timeline"), j("mismatches"), j("activity?since_id=" + lastAct)]);
     S = s; alerts = a.alerts; events = ev.events; mism = mm.mismatches;
     offset = s.server_time - Date.now() / 1000;
     for (const r of act.activity) { acts.push(r); lastAct = Math.max(lastAct, r.id); }

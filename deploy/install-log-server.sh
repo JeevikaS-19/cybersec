@@ -18,7 +18,7 @@ mkdir -p "$PROTECTED"
 DRY=true
 [ "${COC_L3_DRY_RUN:-1}" = 0 ] && DRY=false
 sed -e "s|^    - /var/log/bank[[:space:]]*$|    - $PROTECTED|" -e "s|^  dry_run: true.*|  dry_run: $DRY|" \
-    /opt/coc/config/layers.yaml > /opt/coc/config/layers.server.yaml
+    -e "s|^  editors_scope: anywhere.*|  editors_scope: ${COC_EDITORS_SCOPE:-anywhere}|"     /opt/coc/config/layers.yaml > /opt/coc/config/layers.server.yaml
 grep -q -- "- $PROTECTED" /opt/coc/config/layers.server.yaml || { echo "could not set the protected path"; exit 1; }
 
 python3 -m venv /opt/coc/venv

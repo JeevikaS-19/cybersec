@@ -23,6 +23,7 @@ from layers.common import events
 
 DIFF_LIMIT = 4000
 DEFAULTS = {"mode": "deception", "protected_paths": ["/var/log/bank"], "editors": [], "file_commands": [],
+            "editors_scope": "anywhere",
             "watch_cd": True, "profiles_file": "/etc/coc/profiles"}
 
 
@@ -126,9 +127,11 @@ def run(name, args):
                                             "rule": f"Entered protected path {targets[0]}"})
         return 0  # the shell function does the real cd
     is_editor = name in cfg["editors"]
+    # editors_scope "protected": editors trip only inside protected paths (quieter on a shared server)
+    anywhere = is_editor and cfg.get("editors_scope", "anywhere") != "protected"
     platform, rest = authorized(args)
     targets = protected_targets(rest, cfg["protected_paths"])
-    if not is_editor and not targets and platform is None:
+    if not anywhere and not targets and platform is None:
         return run_real(name, args)  # ordinary use outside the protected paths
     if platform:
         # rest never contains the profile-id, so it is never logged or sent

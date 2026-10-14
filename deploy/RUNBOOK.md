@@ -1,3 +1,5 @@
+> **Superseded by `CT105 Changes.md`** (repo root): no new subdomains; the witness is served at `witness.jrushvj.dev/custody/`.
+
 # Integration runbook: Banking-system-fullstack on ct105 + witness on Oracle
 
 Tested: both installers on a clean Linux box, and the agent against this app (their compose, real API,

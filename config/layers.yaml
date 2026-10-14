@@ -27,6 +27,7 @@ layer1:
     - /var/log/bank
   editors: [nano, vi, vim, gedit]                           # trip on any file without the profile-id
   file_commands: [rm, mv, cp, sed, truncate, shred, cat]    # trip inside protected_paths without the profile-id
+  editors_scope: anywhere      # anywhere = editors trip on any file without the profile-id; protected = only inside protected_paths
   watch_cd: true               # cd into a protected path is reported
   profiles_file: /etc/coc/profiles   # profile-id hashes per platform (python -m layers.l1_tripwire.profiles add <platform>)
   backstop:                    # catches bypasses of the wrappers (full path, other tools, temp-file rename)

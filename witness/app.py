@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import Body, Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from shared import export_public_key
 from witness import checks, events, keyholders, quarantine, records
@@ -16,6 +16,7 @@ from witness.store import connect, get_state, init_db, set_state
 
 DEFAULT_LAYERS = Path(__file__).resolve().parents[1] / "config" / "layers.yaml"
 AUDITOR_HTML = Path(__file__).resolve().parent / "auditor.html"
+PREFIX = os.environ.get("WITNESS_PATH_PREFIX", "").rstrip("/")  # e.g. /custody
 
 
 def load_config(path):
@@ -70,7 +71,7 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
         yield
         stop.set()
 
-    app = FastAPI(lifespan=lifespan)
+    app = FastAPI(lifespan=None if PREFIX else lifespan)
 
     def get_conn():
         conn = connect(db_path)
@@ -167,4 +168,14 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     def get_verify(from_seq: int = 0, to_seq: int = 10**9, conn=Depends(get_conn)):
         return checks.verify_range(conn, from_seq, to_seq)
 
+    if PREFIX:
+        # Served under a path on a shared hostname (e.g. witness.example/custody/*); the proxy keeps the prefix.
+        outer = FastAPI(lifespan=lifespan)
+
+        @outer.get(PREFIX, include_in_schema=False)
+        def to_slash():
+            return RedirectResponse(PREFIX + "/")  # the page uses relative URLs
+
+        outer.mount(PREFIX, app)
+        return outer
     return app

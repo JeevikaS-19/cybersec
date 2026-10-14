@@ -166,3 +166,18 @@ def test_profile_id_authorizes_and_is_never_logged(tmp_path, monkeypatch):
     assert event["trigger"] == "authorized:rm" and event["state"] == "normal"
     assert event["detail"]["profile"] == "demo-bank"
     assert "bank-7f3a9c2e" not in json.dumps(event)
+
+
+def test_editors_scope_protected_only_trips_inside_protected_paths(tmp_path, monkeypatch):
+    from layers.l1_tripwire import trip
+
+    log = _l1_env(tmp_path, monkeypatch, "deception")
+    cfg = tmp_path / "layers.yaml"
+    cfg.write_text("layer1:\n  editors: [nano]\n  file_commands: [rm]\n  editors_scope: protected\n")
+    monkeypatch.setattr(layer_events, "LAYERS_CONFIG", cfg)
+    monkeypatch.setattr(trip, "run_real", lambda name, args: 0)
+    monkeypatch.setattr(trip, "deceive_editor", lambda name, args, target: 0)
+    assert trip.run("nano", [str(tmp_path / "notes.txt")]) == 0
+    assert layer_events.pending() == []  # everyday editing elsewhere: no alert
+    trip.run("nano", [str(log)])
+    assert [json.loads(p.read_text())["trigger"] for p in layer_events.pending()] == ["wrapper:nano"]
