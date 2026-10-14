@@ -19,6 +19,7 @@ layer2:
   record_share: 0.4             # share that ask for a specific record #N; the rest ask for the latest hash
   sweep_seconds: 15             # rolling sweep of every record this often
   sweep_batch: 200
+  balance_recheck_seconds: 3     # a balance mismatch is re-asked after this long; alert only if it persists
 
 layer1:
   mode: deception              # deception = decoy editor, real file untouched, attempted diff captured; block = refuse

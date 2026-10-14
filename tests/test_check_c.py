@@ -105,7 +105,27 @@ def test_t3b_db_edit_without_log_caught_by_state_challenge(witness, monkeypatch)
     agent, ledger = _honest_run(witness)
     ch = _state_challenge(agent, ledger, monkeypatch)
     edited = ledger.balances[ch["account"]] + 1_000_000  # A6: root edits bank.db, writes no log entry
+    monkeypatch.setattr(checks, "RECHECK_SECONDS", 0.0)
     assert _answer_state(agent, ledger, ch, edited) == {"status": "mismatch"}
+    assert _status(witness.url)["checks"]["C"] == "green"  # first sighting: re-check before alerting
+    again = _poll(agent)
+    assert again["type"] == "state" and again["account"] == ch["account"]  # the witness asks again
+    assert _answer_state(agent, ledger, again, edited) == {"status": "mismatch"}
     checks_now = _status(witness.url)["checks"]
     assert checks_now == {"A": "green", "B": "green", "C": "red"}
     assert _tamper_types(witness.url) == ["db_edited_without_log"]
+
+
+def _poll(agent):
+    return requests.get(f"{agent.url}/challenge/poll", params={"platform_id": agent.platform_id}, timeout=5).json()["challenge"]
+
+
+def test_t3c_transient_mismatch_that_clears_on_recheck_never_alerts(witness, monkeypatch):
+    # A platform that updates the balance first and writes the transaction row a moment later.
+    agent, ledger = _honest_run(witness)
+    ch = _state_challenge(agent, ledger, monkeypatch)
+    monkeypatch.setattr(checks, "RECHECK_SECONDS", 0.0)
+    assert _answer_state(agent, ledger, ch, ledger.balances[ch["account"]] - 999) == {"status": "mismatch"}
+    again = _poll(agent)
+    assert _answer_state(agent, ledger, again, ledger.balances[ch["account"]]) == {"status": "ok"}
+    assert _status(witness.url)["checks"]["C"] == "green" and _tamper_types(witness.url) == []

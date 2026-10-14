@@ -174,12 +174,17 @@ def test_witness_seeds_balances_from_state_checks_when_platform_stores_none(witn
         return requests.post(f"{a.url}/challenge/response", json=body, timeout=5).json()
 
     truth = {"1": 487975, "2": 37075}
-    seeded = set()
-    while seeded != {"1", "2"}:
+    monkeypatch.setattr(checks, "RECHECK_SECONDS", 0.0)
+    answers = {"1": 0, "2": 0}
+    while min(answers.values()) < 2:  # a starting balance needs two answers that agree
         ch = ask()
         assert answer(ch, truth[ch["account"]]) == {"status": "ok"}
-        seeded.add(ch["account"])
-    ch = ask()  # seeded now: a later balance that doesn't match the replay is Check C red
+        answers[ch["account"]] += 1
+    seeded = {r[0] for r in __import__("sqlite3").connect(witness.db).execute("SELECT account FROM balances")}
+    assert seeded == {"1", "2"}
+    ch = ask()  # seeded now: a later balance that doesn't match the replay is Check C red (after a re-check)
+    assert answer(ch, truth[ch["account"]] + 1000000) == {"status": "mismatch"}
+    ch = ask()
     assert answer(ch, truth[ch["account"]] + 1000000) == {"status": "mismatch"}
     s = requests.get(f"{witness.url}/status", timeout=5).json()
     assert s["checks"]["C"] == "red"

@@ -20,6 +20,7 @@ CHALLENGE_SECONDS = cfg("layer2", "challenge_deadline_seconds", 5.0, "CHALLENGE_
 CHALLENGE_CHANCE = cfg("layer2", "challenge_chance", 0.2, "CHALLENGE_CHANCE")
 STATE_SHARE = cfg("layer2", "state_share", 0.3, "STATE_SHARE")
 RECORD_SHARE = cfg("layer2", "record_share", 0.4, "RECORD_SHARE")
+RECHECK_SECONDS = cfg("layer2", "balance_recheck_seconds", 3.0, "BALANCE_RECHECK")
 A_KINDS = {
     "sequence_gap", "chain_break", "bad_signature", "unknown_key_id", "entry_edited",
     "entry_deleted", "entries_reordered", "entry_replayed", "late_entry", "challenge_mismatch",
@@ -88,6 +89,8 @@ def _replay_balances(conn, entry, now_ts):
         if row is None and reported is None:
             with conn:
                 conn.execute("INSERT OR IGNORE INTO unseeded (account) VALUES (?)", (account,))
+            moved = get_state(conn, f"seedmove:{account}") or 0  # movement since a seed candidate was taken
+            set_state(conn, f"seedmove:{account}", moved + delta)
             continue
         if row is None:
             before = reported - delta
@@ -186,7 +189,12 @@ def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
         return None
     pending = get_state(conn, "challenge")
     if pending is None:
-        pending = records.due_sweep(conn, now_ts)
+        recheck = get_state(conn, "recheck")
+        if recheck and state_allowed and now_ts >= recheck["at"]:
+            set_state(conn, "recheck", None)
+            pending = {"type": "state", "account": recheck["account"]}
+        else:
+            pending = records.due_sweep(conn, now_ts)  # a pending re-check never blocks other checks
         if pending is None and random.random() < CHALLENGE_CHANCE:
             accounts = [r["account"] for r in conn.execute(
                 "SELECT account FROM balances UNION SELECT account FROM unseeded ORDER BY account")]
@@ -256,10 +264,21 @@ def answer_challenge(conn, body, now_ts):
         reported, replay = body.get("balance_paise"), row["balance_paise"]
         if reported != replay:
             offset = reported - replay
+            suspect = get_state(conn, f"suspect:{account}")
+            if not (suspect and suspect["offset"] == offset and now_ts - suspect["time"] >= RECHECK_SECONDS):
+                # First sighting: platforms that update a balance and write the transaction row as two
+                # steps can be caught mid-way. Ask about this account again shortly; alert only if it persists.
+                if not (suspect and suspect["offset"] == offset):
+                    set_state(conn, f"suspect:{account}", {"offset": offset, "time": now_ts})
+                set_state(conn, "recheck", {"account": account, "at": now_ts + RECHECK_SECONDS})
+                log_activity(conn, "challenge_failed", f"{pending['id']} state {account}: bank {reported} vs replay {replay}, re-checking", now_ts)
+                return {"status": "mismatch"}
+            set_state(conn, f"suspect:{account}", None)
             add_alert(conn, "db_edited_without_log", f"{account}:{offset}", "db_edited_without_log",
-                      f"{account} bank balance {reported}, witness replay {replay}, offset {offset}", now_ts)
+                      f"{account} bank balance {reported}, witness replay {replay}, offset {offset} (confirmed on re-check)", now_ts)
             log_activity(conn, "challenge_failed", f"{pending['id']} state {account}: bank {reported} vs replay {replay}", now_ts)
             return {"status": "mismatch"}
+        set_state(conn, f"suspect:{account}", None)
         _resolve(conn, ["missed_challenge"])
         log_activity(conn, "challenge_ok", f"{pending['id']} state {account} = {reported}", now_ts)
         return {"status": "ok"}
@@ -272,9 +291,23 @@ def answer_challenge(conn, body, now_ts):
     return {"status": "ok"}
 
 def seed_balance(conn, pending, account, reported, now_ts):
-    """Platform without stored balances: the first state answer becomes the witness's starting point."""
+    """Platform without stored balances: seed the witness's starting point from state answers.
+
+    One answer isn't enough: a platform that updates the balance and writes the transaction row as two steps
+    can be caught in between. Accept only when two answers agree once the sealed movement in between is
+    added (B2 == B1 + moved); otherwise take the newer answer as the candidate and ask again."""
     if not isinstance(reported, int):
         return {"status": "mismatch"}
+    cand = get_state(conn, f"seedcand:{account}")
+    moved = get_state(conn, f"seedmove:{account}") or 0
+    if not cand or reported != cand["balance"] + (moved - cand["moved"]):
+        set_state(conn, f"seedcand:{account}", {"balance": reported, "moved": moved})
+        set_state(conn, "recheck", {"account": account, "at": now_ts + RECHECK_SECONDS})
+        _resolve(conn, ["missed_challenge"])
+        log_activity(conn, "challenge_ok", f"{pending['id']} state {account} = {reported} (starting balance candidate, confirming)", now_ts)
+        return {"status": "ok"}
+    set_state(conn, f"seedcand:{account}", None)
+    set_state(conn, f"seedmove:{account}", None)
     with conn:
         conn.execute("INSERT OR REPLACE INTO balances (account, balance_paise) VALUES (?, ?)", (account, reported))
         conn.execute("DELETE FROM unseeded WHERE account = ?", (account,))
