@@ -5,7 +5,7 @@
 set -eu
 PREFIX="${1:-/opt/trip}"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-PY="$(command -v python3)"
+PY="${COC_PYTHON:-$(command -v python3)}"   # installers pass the venv python (it has pyyaml)
 BIN="$PREFIX/bin"
 TRIP="env COC_TRIP_BIN=$BIN PYTHONPATH=$REPO $PY -m layers.l1_tripwire.trip"
 mkdir -p "$BIN"

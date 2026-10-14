@@ -1,0 +1,13 @@
+[Unit]
+Description=Chain of Custody witness (API + auditor view, no SSH)
+After=network-online.target
+
+[Service]
+User=custody-witness
+Environment=PYTHONPATH=/opt/custody-witness WITNESS_DB_PATH=/var/lib/custody-witness/witness.db
+ExecStart=/opt/custody-witness/venv/bin/python -m uvicorn --factory witness.app:create_app --host 127.0.0.1 --port {{PORT}}
+Restart=always
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target
