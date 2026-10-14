@@ -1,6 +1,8 @@
 import json
 import sqlite3
 
+from witness.classify import TAMPER_TYPES
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agents (
     key_id TEXT PRIMARY KEY,
@@ -73,6 +75,8 @@ def set_state(conn, key, value):
         conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, json.dumps(value)))
 
 def add_alert(conn, kind, ref, tamper_type, detail, now_ts):
+    if tamper_type not in TAMPER_TYPES:
+        print(f"WARNING: unknown tamper_type {tamper_type!r} on alert {kind} ref {ref}")
     # One alert per (kind, ref): repeated self-checks never duplicate it.
     with conn:
         conn.execute(
