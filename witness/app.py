@@ -11,7 +11,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from shared import export_public_key
-from witness import checks, events
+from witness import checks, events, records
 from witness.store import connect, get_state, init_db, set_state
 
 DEFAULT_LAYERS = Path(__file__).resolve().parents[1] / "config" / "layers.yaml"
@@ -124,6 +124,10 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     @app.get("/timeline")
     def get_timeline(since: float = 0, conn=Depends(get_conn)):
         return {"events": events.timeline(conn, since)}
+
+    @app.get("/mismatches")
+    def get_mismatches(conn=Depends(get_conn)):
+        return {"mismatches": records.list_mismatches(conn)}
 
     @app.get("/activity")
     def get_activity(since_id: int = 0, limit: int = 200, conn=Depends(get_conn)):

@@ -1,4 +1,6 @@
-from shared import canonical_encode, generate_keypair, hash_entry
+import requests
+
+from shared import canonical_encode, generate_keypair, hash_entry, sign_payload
 from tests.helpers import Agent, ts
 from witness import checks
 from witness.store import connect
@@ -120,3 +122,74 @@ def test_swapped_stored_rows_are_entries_reordered(witness):
     kinds = {(k, ref) for k, ref, _ in _alerts(witness.db)}
     assert ("entries_reordered", "2") in kinds
     assert not any(k == "entry_deleted" for k, _ in kinds)  # a swap is not a deletion
+
+
+RECORD_FIELDS = ("txn_id", "timestamp", "from_account", "to_account", "amount_paise",
+                 "from_balance_paise", "to_balance_paise")
+
+
+def _poll(a):
+    return requests.get(f"{a.url}/challenge/poll", params={"platform_id": a.platform_id}, timeout=5).json()["challenge"]
+
+
+def _reply(a, payload):
+    payload["signature"] = sign_payload(a.priv, dict(payload))
+    return requests.post(f"{a.url}/challenge/response", json=payload, timeout=5).json()
+
+
+def _server(a, seq, **changes):
+    rec = {f: a.chain[seq - 1][f] for f in RECORD_FIELDS}
+    rec.update(changes)
+    return rec
+
+
+def test_record_check_catches_server_side_edit_then_full_sweep_lists_all(witness, monkeypatch):
+    from witness import records
+
+    a = Agent(witness.url)
+    for _ in range(5):
+        a.send(a.next_entry())
+    monkeypatch.setattr(checks, "CHALLENGE_CHANCE", 1.0)
+    monkeypatch.setattr(checks, "STATE_SHARE", 0.0)
+    monkeypatch.setattr(checks, "RECORD_SHARE", 1.0)
+    monkeypatch.setattr(records, "SWEEP_SECONDS", float("inf"))
+    ch = _poll(a)
+    assert ch["type"] == "record"
+    seq = ch["seq"]
+    # Attacker edited the bank's row for this record: amount cut to 1 paise.
+    body = {"challenge_id": ch["id"], "type": "record", "seq": seq, "record": _server(a, seq, amount_paise=1)}
+    assert _reply(a, body) == {"status": "mismatch"}
+    status = requests.get(f"{witness.url}/status", timeout=5).json()
+    assert status["checks"]["A"] == "red"
+    (m,) = requests.get(f"{witness.url}/mismatches", timeout=5).json()["mismatches"]
+    assert m["seq"] == seq and m["fields"] == ["amount_paise"]
+    assert m["witness_copy"]["amount_paise"] == 100 and m["server_copy"]["amount_paise"] == 1
+    assert m["witness_hash"] != m["server_hash"]
+    # Next challenge is a full sweep; a second tampered record and a deleted one get listed too.
+    sweep = _poll(a)
+    assert sweep["type"] == "sweep" and sweep["seqs"] == [1, 2, 3, 4, 5]
+    other = 1 if seq != 1 else 2
+    gone = 5 if seq != 5 else 4
+    recs = [{"seq": s, "record": None if s == gone else _server(a, s, **({"amount_paise": 1} if s in (seq, other) else {}))}
+            for s in sweep["seqs"]]
+    assert _reply(a, {"challenge_id": sweep["id"], "type": "sweep", "records": recs}) == {"status": "mismatch"}
+    found = {m["seq"]: m for m in requests.get(f"{witness.url}/mismatches", timeout=5).json()["mismatches"]}
+    assert set(found) == {seq, other, gone}
+    assert found[gone]["server_copy"] is None
+    tamper = {(x["kind"], x["ref"]): x["tamper_type"] for x in requests.get(f"{witness.url}/alerts", timeout=5).json()["alerts"]}
+    assert tamper[("record_mismatch", str(gone))] == "entry_deleted"
+
+
+def test_honest_sweep_matches_and_stays_green(witness, monkeypatch):
+    from witness import records
+
+    a = Agent(witness.url)
+    for _ in range(3):
+        a.send(a.next_entry())
+    monkeypatch.setattr(records, "SWEEP_SECONDS", 0)
+    sweep = _poll(a)
+    assert sweep["type"] == "sweep"
+    recs = [{"seq": s, "record": _server(a, s)} for s in sweep["seqs"]]
+    assert _reply(a, {"challenge_id": sweep["id"], "type": "sweep", "records": recs}) == {"status": "ok"}
+    assert requests.get(f"{witness.url}/mismatches", timeout=5).json()["mismatches"] == []
+    assert requests.get(f"{witness.url}/status", timeout=5).json()["checks"]["A"] == "green"

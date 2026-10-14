@@ -193,6 +193,28 @@ def bank_balance_at(account, txn_id):
     return balance
 
 
+RECORD_FIELDS = ("txn_id", "timestamp", "from_account", "to_account", "amount_paise",
+                 "from_balance_paise", "to_balance_paise")
+
+
+def server_records(conn, seqs):
+    # Record #seq as the bank holds it now, rebuilt from the bank's own row (None if the row is gone).
+    txn_ids = {}
+    for seq in seqs:
+        row = conn.execute("SELECT body FROM entries WHERE seq = ?", (seq,)).fetchone()
+        txn_ids[seq] = json.loads(row[0])["txn_id"] if row else None
+    bank = sqlite3.connect(BANK_DB_PATH)
+    try:
+        out = []
+        for seq in seqs:
+            row = bank.execute(f"SELECT {', '.join(RECORD_FIELDS)} FROM transactions WHERE txn_id = ?",
+                               (txn_ids[seq],)).fetchone() if txn_ids[seq] else None
+            out.append({"seq": seq, "record": dict(zip(RECORD_FIELDS, row, strict=True)) if row else None})
+        return out
+    finally:
+        bank.close()
+
+
 def answer_challenge(conn, priv):
     resp = requests.get(f"{WITNESS_URL}/challenge/poll", params={"platform_id": PLATFORM_ID}, timeout=TIMEOUT)
     challenge = resp.json().get("challenge")
@@ -218,6 +240,11 @@ def answer_challenge(conn, priv):
             "balance_paise": balance,
             "last_seq": last_seq,
         }
+    elif challenge["type"] == "record":
+        (rec,) = server_records(conn, [challenge["seq"]])
+        payload = {"challenge_id": challenge["id"], "type": "record", "seq": challenge["seq"], "record": rec["record"]}
+    elif challenge["type"] == "sweep":
+        payload = {"challenge_id": challenge["id"], "type": "sweep", "records": server_records(conn, challenge["seqs"])}
     else:
         return
     body = dict(payload, signature=sign_payload(priv, payload))

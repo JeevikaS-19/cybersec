@@ -54,6 +54,16 @@ CREATE TABLE IF NOT EXISTS activity (
     kind TEXT NOT NULL,
     detail TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS mismatches (
+    seq INTEGER PRIMARY KEY,
+    caught_time REAL NOT NULL,
+    caught_by TEXT NOT NULL,
+    fields TEXT NOT NULL,
+    witness_copy TEXT NOT NULL,
+    server_copy TEXT,
+    witness_hash TEXT NOT NULL,
+    server_hash TEXT
+);
 CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
     value TEXT

@@ -22,6 +22,8 @@ All amounts: **integer paise**. All timestamps: ISO 8601 UTC string. All keys, h
 | Heartbeat | `{platform_id, timestamp}` | agent key |
 | Hash-challenge response | `{challenge_id, type, latest_hash, last_seq}` | agent key |
 | State-challenge response | `{challenge_id, type, account, balance_paise, last_seq}` | agent key |
+| Record-challenge response | `{challenge_id, type, seq, record}` | agent key |
+| Sweep response | `{challenge_id, type, records}` | agent key |
 | Layer event | every event field except `signature` | agent key |
 | Evidence bundle (in vault) | the bundle JSON except `signature` | agent key |
 | Break-glass command | `{command_id, action, issued_at, secret}` (`secret` only on unlock) | witness key |
@@ -88,13 +90,18 @@ Every 5 s. Counts only if the signature verifies and the timestamp is later than
 { "challenge": null }
 { "challenge": { "id": "c-101", "type": "hash" } }
 { "challenge": { "id": "c-102", "type": "state", "account": "acc-1" } }
+{ "challenge": { "id": "c-103", "type": "record", "seq": 42 } }
+{ "challenge": { "id": "c-104", "type": "sweep", "seqs": [1, 2, 3] } }
 ```
+`record` / `sweep`: the agent rebuilds each record from the bank's own row as it is **now** (`txn_id`, `timestamp`, `from_account`, `to_account`, `amount_paise`, `from_balance_paise`, `to_balance_paise`; `null` if the row is gone). The witness compares field by field with its sealed copy. A rolling sweep (`SWEEP_SECONDS`, default 15, batches of `SWEEP_BATCH`) covers every record; the first mismatch triggers a full sweep. Mismatch = `record_mismatch` alert (Check A), `entry_edited` or `entry_deleted`, listed at `GET /mismatches`.
 Polled every 2 s. Issued at random times.
 
 ### `POST /challenge/response`
 ```json
 { "challenge_id": "c-101", "type": "hash", "latest_hash": "base64...", "last_seq": 42, "signature": "base64..." }
 { "challenge_id": "c-102", "type": "state", "account": "acc-1", "balance_paise": 4850000, "last_seq": 42, "signature": "base64..." }
+{ "challenge_id": "c-103", "type": "record", "seq": 42, "record": { "txn_id": "txn-00042", "amount_paise": 500000, "...": "..." }, "signature": "base64..." }
+{ "challenge_id": "c-104", "type": "sweep", "records": [ { "seq": 1, "record": { } }, { "seq": 2, "record": null } ], "signature": "base64..." }
 // response
 { "status": "ok" | "mismatch" }
 ```

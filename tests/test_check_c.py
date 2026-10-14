@@ -2,7 +2,7 @@ import requests
 
 from shared import GENESIS_PREV_HASH, hash_entry, sign_payload
 from tests.helpers import Agent, ts
-from witness import checks
+from witness import checks, records
 
 OPENING = {"acc-1": 100_000, "acc-2": 50_000}
 
@@ -51,6 +51,8 @@ def _answer_hash(agent, ledger, ch):
 def _state_challenge(agent, ledger, monkeypatch):
     # Force issuance; answer any hash challenges honestly until a state one arrives.
     monkeypatch.setattr(checks, "CHALLENGE_CHANCE", 1.0)
+    monkeypatch.setattr(checks, "RECORD_SHARE", 0.0)  # record checks have their own tests
+    monkeypatch.setattr(records, "SWEEP_SECONDS", float("inf"))
     for _ in range(100):
         ch = requests.get(f"{agent.url}/challenge/poll", params={"platform_id": agent.platform_id}, timeout=5).json()["challenge"]
         assert ch is not None, "witness issued no challenge with CHALLENGE_CHANCE=1.0"

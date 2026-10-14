@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 from shared import GENESIS_PREV_HASH, hash_entry, verify_signature
+from witness import records
 from witness.classify import for_rejection
 from witness.store import add_alert, get_state, log_activity, set_state
 
@@ -17,11 +18,12 @@ ENTRY_FIELDS = (
 SILENCE_SECONDS = 15
 CHALLENGE_SECONDS = 5
 CHALLENGE_CHANCE = float(os.environ.get("CHALLENGE_CHANCE", "0.2"))
-STATE_SHARE = float(os.environ.get("STATE_SHARE", "0.5"))
+STATE_SHARE = float(os.environ.get("STATE_SHARE", "0.3"))
+RECORD_SHARE = float(os.environ.get("RECORD_SHARE", "0.4"))
 A_KINDS = {
     "sequence_gap", "chain_break", "bad_signature", "unknown_key_id", "entry_edited",
     "entry_deleted", "entries_reordered", "entry_replayed", "late_entry", "challenge_mismatch",
-    "bad_challenge_signature",
+    "bad_challenge_signature", "record_mismatch",
 }
 B_KINDS = {"non_monotonic_timestamp", "silence", "missed_challenge", "bad_heartbeat", "replayed_heartbeat"}
 C_KINDS = {"balance_misreported", "db_edited_without_log"}
@@ -160,25 +162,39 @@ def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
     if row is None:
         return None
     pending = get_state(conn, "challenge")
-    if pending is None and random.random() < CHALLENGE_CHANCE:
-        accounts = [r["account"] for r in conn.execute("SELECT account FROM balances ORDER BY account")]
-        pending = {
-            "id": "c-" + secrets.token_hex(4),
-            "type": "hash",
-            "key_id": row["key_id"],
-            "deadline": now_ts + CHALLENGE_SECONDS,
-        }
-        if state_allowed and accounts and random.random() < STATE_SHARE:
-            pending["type"] = "state"
-            pending["account"] = random.choice(accounts)
-        set_state(conn, "challenge", pending)
-        log_activity(conn, "challenge_issued",
-                     f"{pending['id']} {pending['type']}" + (f" {pending['account']}" if pending.get("account") else ""), now_ts)
+    if pending is None:
+        pending = records.due_sweep(conn, now_ts)
+        if pending is None and random.random() < CHALLENGE_CHANCE:
+            accounts = [r["account"] for r in conn.execute("SELECT account FROM balances ORDER BY account")]
+            r = random.random()
+            if state_allowed and accounts and r < STATE_SHARE:
+                pending = {"type": "state", "account": random.choice(accounts)}
+            elif r < STATE_SHARE + RECORD_SHARE:
+                pending = records.random_record(conn)
+            pending = pending or {"type": "hash"}
+        if pending is not None:
+            pending.update(id="c-" + secrets.token_hex(4), key_id=row["key_id"],
+                           deadline=now_ts + CHALLENGE_SECONDS * (3 if pending["type"] == "sweep" else 1))
+            set_state(conn, "challenge", pending)
+            log_activity(conn, "challenge_issued", f"{pending['id']} {_describe(pending)}", now_ts)
     if pending is None:
         return None
-    if pending["type"] == "state":
-        return {"id": pending["id"], "type": "state", "account": pending["account"]}
-    return {"id": pending["id"], "type": pending["type"]}
+    return {k: v for k, v in pending.items() if k in ("id", "type", "account", "seq", "seqs")}
+
+
+def _describe(pending):
+    if pending["type"] in ("record", "sweep"):
+        return records.label(pending)
+    return "state " + pending["account"] if pending["type"] == "state" else "hash (latest record)"
+
+
+SIGNED_FIELDS = {
+    "hash": ("challenge_id", "type", "latest_hash", "last_seq"),
+    "state": ("challenge_id", "type", "account", "balance_paise", "last_seq"),
+    "record": ("challenge_id", "type", "seq", "record"),
+    "sweep": ("challenge_id", "type", "records"),
+}
+
 
 def answer_challenge(conn, body, now_ts):
     pending = get_state(conn, "challenge")
@@ -187,14 +203,17 @@ def answer_challenge(conn, body, now_ts):
         return {"status": "mismatch"}
     if body.get("type") != pending["type"]:
         return {"status": "mismatch"}
-    if pending["type"] == "state":
-        fields = ("challenge_id", "type", "account", "balance_paise", "last_seq")
-    else:
-        fields = ("challenge_id", "type", "latest_hash", "last_seq")
-    payload = {k: body.get(k) for k in fields}
+    payload = {k: body.get(k) for k in SIGNED_FIELDS[pending["type"]]}
     if not verify_signature(_public_key(conn, pending["key_id"]), payload, body.get("signature", "")):
         add_alert(conn, "bad_challenge_signature", pending["id"], "forged", "challenge response signature invalid", now_ts)
         return {"status": "mismatch"}
+    if pending["type"] in ("record", "sweep"):
+        result = records.answer(conn, pending, body, now_ts)
+        if result is None:
+            return {"status": "mismatch"}  # not an answer to this question; keep waiting
+        set_state(conn, "challenge", None)
+        _resolve(conn, ["missed_challenge"])
+        return result
     last = _last_accepted(conn)
     last_seq = last["seq"] if last else 0
     last_hash = last["hash"] if last else GENESIS_PREV_HASH
@@ -229,7 +248,7 @@ def answer_challenge(conn, body, now_ts):
 def challenge_check(conn, now_ts):
     pending = get_state(conn, "challenge")
     if pending and now_ts > pending["deadline"]:
-        add_alert(conn, "missed_challenge", pending["id"], "agent_silenced", f"no answer to {pending['type']} challenge", now_ts)
+        add_alert(conn, "missed_challenge", pending["id"], "agent_silenced", f"no answer to {_describe(pending)} challenge", now_ts)
         log_activity(conn, "challenge_missed", f"{pending['id']} {pending['type']}", now_ts)
         set_state(conn, "challenge", None)
 
