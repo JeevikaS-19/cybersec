@@ -82,7 +82,7 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
 
     @app.post("/entries")
     def post_entry(entry: dict = Body(...), conn=Depends(get_conn)):
-        return checks.submit_entry(conn, entry, checks.now())
+        return checks.submit_entry(conn, entry, checks.now(), config["checks"]["C"])
 
     @app.post("/heartbeat")
     def post_heartbeat(body: dict = Body(...), conn=Depends(get_conn)):
@@ -92,7 +92,7 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     def poll_challenge(platform_id: str, conn=Depends(get_conn)):
         if not config["checks"]["B"]:
             return {"challenge": None}
-        return {"challenge": checks.poll_challenge(conn, platform_id, checks.now())}
+        return {"challenge": checks.poll_challenge(conn, platform_id, checks.now(), config["checks"]["C"])}
 
     @app.post("/challenge/response")
     def post_challenge_response(body: dict = Body(...), conn=Depends(get_conn)):

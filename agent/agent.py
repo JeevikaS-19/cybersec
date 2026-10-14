@@ -154,18 +154,55 @@ def send_heartbeat(priv):
     requests.post(f"{WITNESS_URL}/heartbeat", json=body, timeout=TIMEOUT).raise_for_status()
 
 
+def bank_balance_at(account, txn_id):
+    # Bank balance as of txn_id: current balance minus the effect of later transfers.
+    bank = sqlite3.connect(BANK_DB_PATH)
+    try:
+        row = bank.execute("SELECT balance_paise FROM accounts WHERE account_id = ?", (account,)).fetchone()
+        at = bank.execute("SELECT id FROM transactions WHERE txn_id = ?", (txn_id,)).fetchone()
+        if row is None or at is None:
+            return None
+        later = bank.execute(
+            "SELECT from_account, to_account, amount_paise FROM transactions WHERE id > ?", (at[0],)
+        ).fetchall()
+    finally:
+        bank.close()
+    balance = row[0]
+    for src, dst, amount in later:
+        if src == account:
+            balance += amount
+        if dst == account:
+            balance -= amount
+    return balance
+
+
 def answer_challenge(conn, priv):
     resp = requests.get(f"{WITNESS_URL}/challenge/poll", params={"platform_id": PLATFORM_ID}, timeout=TIMEOUT)
     challenge = resp.json().get("challenge")
-    if not challenge or challenge["type"] != "hash":
+    if not challenge:
         return
     last = last_accepted_entry(conn)
-    payload = {
-        "challenge_id": challenge["id"],
-        "type": challenge["type"],
-        "latest_hash": last["hash"] if last else GENESIS_PREV_HASH,
-        "last_seq": last["seq"] if last else 0,
-    }
+    last_seq = last["seq"] if last else 0
+    if challenge["type"] == "hash":
+        payload = {
+            "challenge_id": challenge["id"],
+            "type": "hash",
+            "latest_hash": last["hash"] if last else GENESIS_PREV_HASH,
+            "last_seq": last_seq,
+        }
+    elif challenge["type"] == "state" and last:
+        balance = bank_balance_at(challenge["account"], last["txn_id"])
+        if balance is None:
+            return
+        payload = {
+            "challenge_id": challenge["id"],
+            "type": "state",
+            "account": challenge["account"],
+            "balance_paise": balance,
+            "last_seq": last_seq,
+        }
+    else:
+        return
     body = dict(payload, signature=sign_payload(priv, payload))
     requests.post(f"{WITNESS_URL}/challenge/response", json=body, timeout=TIMEOUT).raise_for_status()
 

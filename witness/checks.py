@@ -21,6 +21,7 @@ A_KINDS = {
     "entry_deleted", "entries_reordered", "challenge_mismatch", "bad_challenge_signature",
 }
 B_KINDS = {"non_monotonic_timestamp", "silence", "missed_challenge", "bad_heartbeat", "replayed_heartbeat"}
+C_KINDS = {"balance_misreported", "db_edited_without_log"}
 
 TAMPER_FOR_REASON = {
     "bad_signature": "forged",
@@ -63,7 +64,24 @@ def _reject_reason(conn, entry, last):
         return "non_monotonic_timestamp"
     return None
 
-def submit_entry(conn, entry, now_ts):
+def _replay_balances(conn, entry, now_ts):
+    # Check C: the witness keeps its own balances and compares the reported ones.
+    # Opening balance is inferred from the first entry seen per account (trust on first use).
+    seq, amount = entry["seq"], entry["amount_paise"]
+    for account, reported, delta in (
+        (entry["from_account"], entry["from_balance_paise"], -amount),
+        (entry["to_account"], entry["to_balance_paise"], amount),
+    ):
+        row = conn.execute("SELECT balance_paise FROM balances WHERE account = ?", (account,)).fetchone()
+        before = row["balance_paise"] if row else reported - delta
+        expected = before + delta
+        if reported != expected:
+            add_alert(conn, "balance_misreported", f"{seq}:{account}", "balance_misreported",
+                      f"{account} reported {reported}, witness replay {expected}", now_ts)
+        with conn:
+            conn.execute("INSERT OR REPLACE INTO balances (account, balance_paise) VALUES (?, ?)", (account, expected))
+
+def submit_entry(conn, entry, now_ts, check_c=True):
     last = _last_accepted(conn)
     reason = _reject_reason(conn, entry, last)
     accepted = reason is None
@@ -73,6 +91,8 @@ def submit_entry(conn, entry, now_ts):
     with conn:
         conn.execute(f"INSERT INTO entries ({columns}) VALUES ({placeholders})", values)
     if accepted:
+        if check_c:
+            _replay_balances(conn, entry, now_ts)
         return {"status": "accepted"}
 
     seq = entry.get("seq")
@@ -121,21 +141,27 @@ def silence_check(conn, now_ts):
     if hb and now_ts - hb["recv"] > SILENCE_SECONDS:
         add_alert(conn, "silence", hb["recv"], "agent_silenced", "no valid heartbeat for over 15 s", now_ts)
 
-def poll_challenge(conn, platform_id, now_ts):
+def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
     row = conn.execute("SELECT key_id FROM agents WHERE platform_id = ?", (platform_id,)).fetchone()
     if row is None:
         return None
     pending = get_state(conn, "challenge")
     if pending is None and random.random() < CHALLENGE_CHANCE:
+        accounts = [r["account"] for r in conn.execute("SELECT account FROM balances ORDER BY account")]
         pending = {
             "id": "c-" + secrets.token_hex(4),
             "type": "hash",
             "key_id": row["key_id"],
             "deadline": now_ts + CHALLENGE_SECONDS,
         }
+        if state_allowed and accounts and random.random() < 0.5:
+            pending["type"] = "state"
+            pending["account"] = random.choice(accounts)
         set_state(conn, "challenge", pending)
     if pending is None:
         return None
+    if pending["type"] == "state":
+        return {"id": pending["id"], "type": "state", "account": pending["account"]}
     return {"id": pending["id"], "type": pending["type"]}
 
 def answer_challenge(conn, body, now_ts):
@@ -143,7 +169,13 @@ def answer_challenge(conn, body, now_ts):
     if not pending or pending["id"] != body.get("challenge_id") or now_ts > pending["deadline"]:
         return {"status": "mismatch"}
     set_state(conn, "challenge", None)
-    payload = {k: body.get(k) for k in ("challenge_id", "type", "latest_hash", "last_seq")}
+    if body.get("type") != pending["type"]:
+        return {"status": "mismatch"}
+    if pending["type"] == "state":
+        fields = ("challenge_id", "type", "account", "balance_paise", "last_seq")
+    else:
+        fields = ("challenge_id", "type", "latest_hash", "last_seq")
+    payload = {k: body.get(k) for k in fields}
     if not verify_signature(_public_key(conn, pending["key_id"]), payload, body.get("signature", "")):
         add_alert(conn, "bad_challenge_signature", pending["id"], "forged", "challenge response signature invalid", now_ts)
         return {"status": "mismatch"}
@@ -153,6 +185,16 @@ def answer_challenge(conn, body, now_ts):
     if body.get("last_seq") != last_seq:
         # Agent is ahead or behind a queued send; not evidence of tampering.
         return {"status": "mismatch"}
+    if pending["type"] == "state":
+        row = conn.execute("SELECT balance_paise FROM balances WHERE account = ?", (body.get("account"),)).fetchone()
+        if row is None:
+            return {"status": "mismatch"}
+        if body.get("balance_paise") != row["balance_paise"]:
+            add_alert(conn, "db_edited_without_log", pending["id"], "db_edited_without_log",
+                      f"{body.get('account')} bank balance {body.get('balance_paise')}, witness replay {row['balance_paise']}",
+                      now_ts)
+            return {"status": "mismatch"}
+        return {"status": "ok"}
     if body.get("latest_hash") != last_hash:
         add_alert(conn, "challenge_mismatch", pending["id"], "entry_edited", "agent and witness disagree on latest hash", now_ts)
         return {"status": "mismatch"}
@@ -187,11 +229,10 @@ def status(conn, layers):
     last = _last_accepted(conn)
     hb = get_state(conn, "last_heartbeat") or {}
     return {
-        # Check C is Step 3, not built yet, so it always reads green for now.
         "checks": {
             "A": "red" if kinds & A_KINDS else "green",
             "B": "red" if kinds & B_KINDS else "green",
-            "C": "green",
+            "C": "red" if kinds & C_KINDS else "green",
         },
         "layers": {str(n): ("on" if layers.get(n) else "off") for n in (1, 2, 3)},
         "state": "alert" if kinds else "normal",

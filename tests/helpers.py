@@ -20,12 +20,13 @@ class Agent:
         resp.raise_for_status()
         self.key_id = resp.json()["key_id"]
         self.chain = []
+        self.balances = {"acc-1": 100_000, "acc-2": 50_000}  # same opening balances as test_check_c.py
 
-    def make(self, seq, prev_hash, timestamp, priv=None):
+    def make(self, seq, prev_hash, timestamp, priv=None, from_bal=1_000, to_bal=2_000):
         entry = {
             "seq": seq, "timestamp": timestamp, "event_type": "transaction",
             "txn_id": f"txn-{seq:05d}", "from_account": "acc-1", "to_account": "acc-2",
-            "amount_paise": 100, "from_balance_paise": 1000, "to_balance_paise": 2000,
+            "amount_paise": 100, "from_balance_paise": from_bal, "to_balance_paise": to_bal,
             "prev_hash": prev_hash, "key_id": self.key_id,
         }
         entry["hash"] = hash_entry(entry)
@@ -33,9 +34,12 @@ class Agent:
         return entry
 
     def next_entry(self):
+        # Honest entry: moves 100 paise acc-1 -> acc-2 and reports the true balances.
         prev = self.chain[-1]["hash"] if self.chain else GENESIS_PREV_HASH
         n = len(self.chain) + 1
-        entry = self.make(n, prev, ts(n))
+        self.balances["acc-1"] -= 100
+        self.balances["acc-2"] += 100
+        entry = self.make(n, prev, ts(n), from_bal=self.balances["acc-1"], to_bal=self.balances["acc-2"])
         self.chain.append(entry)
         return entry
 

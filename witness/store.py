@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS alerts (
     time REAL NOT NULL,
     UNIQUE (kind, ref)
 );
+CREATE TABLE IF NOT EXISTS balances (
+    account TEXT PRIMARY KEY,
+    balance_paise INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
     value TEXT
