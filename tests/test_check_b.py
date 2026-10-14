@@ -67,3 +67,15 @@ def test_t2f_unanswered_hash_challenge_is_missed(witness, clock):
     clock["seconds"] = 6  # past the 5 s answer window; do not answer
     _silence_check(witness.db)
     assert _alert_kinds(witness.db) == ["missed_challenge"]
+
+
+def test_auditor_view_shows_heartbeats_and_challenges(witness, monkeypatch):
+    a = Agent(witness.url)
+    a.send(a.next_entry())
+    assert a.heartbeat(ts(1))["status"] == "ok"
+    monkeypatch.setattr(checks, "CHALLENGE_CHANCE", 1.0)
+    requests.get(f"{witness.url}/challenge/poll", params={"platform_id": a.platform_id}, timeout=5)
+    kinds = [r["kind"] for r in requests.get(f"{witness.url}/activity", timeout=5).json()["activity"]]
+    assert kinds == ["heartbeat", "challenge_issued"]
+    page = requests.get(witness.url + "/", timeout=5)
+    assert page.status_code == 200 and "auditor view" in page.text

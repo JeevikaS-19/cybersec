@@ -8,12 +8,14 @@ from pathlib import Path
 import yaml
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 
 from shared import export_public_key
 from witness import checks, events
 from witness.store import connect, get_state, init_db, set_state
 
 DEFAULT_LAYERS = Path(__file__).resolve().parents[1] / "config" / "layers.yaml"
+AUDITOR_HTML = Path(__file__).resolve().parent / "auditor.html"
 
 
 def load_config(path):
@@ -122,6 +124,16 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     @app.get("/timeline")
     def get_timeline(since: float = 0, conn=Depends(get_conn)):
         return {"events": events.timeline(conn, since)}
+
+    @app.get("/activity")
+    def get_activity(since_id: int = 0, limit: int = 200, conn=Depends(get_conn)):
+        rows = conn.execute("SELECT id, time, kind, detail FROM activity WHERE id > ? ORDER BY id DESC LIMIT ?",
+                            (since_id, min(limit, 500))).fetchall()
+        return {"activity": [dict(r) for r in reversed(rows)]}
+
+    @app.get("/", response_class=HTMLResponse)
+    def auditor_view():
+        return AUDITOR_HTML.read_text(encoding="utf-8")
 
     @app.get("/status")
     def get_status(conn=Depends(get_conn)):

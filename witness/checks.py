@@ -8,7 +8,7 @@ from datetime import datetime
 
 from shared import GENESIS_PREV_HASH, hash_entry, verify_signature
 from witness.classify import for_rejection
-from witness.store import add_alert, get_state, set_state
+from witness.store import add_alert, get_state, log_activity, set_state
 
 ENTRY_FIELDS = (
     "seq", "timestamp", "event_type", "txn_id", "from_account", "to_account",
@@ -143,9 +143,11 @@ def record_heartbeat(conn, body, now_ts):
         kind = "replayed_heartbeat" if reason == "replayed_heartbeat" else "bad_heartbeat"
         tamper = "entry_replayed" if kind == "replayed_heartbeat" else "forged"
         add_alert(conn, kind, f"{platform_id}:{ts}", tamper, reason, now_ts)
+        log_activity(conn, "heartbeat_rejected", f"{platform_id} {ts}: {reason}", now_ts)
         return {"status": "rejected", "reason": reason}
     set_state(conn, "last_heartbeat", {"ts": ts, "recv": now_ts})
     _resolve(conn, ["silence", "bad_heartbeat", "replayed_heartbeat"])
+    log_activity(conn, "heartbeat", f"{platform_id} {ts}", now_ts)
     return {"status": "ok"}
 
 def silence_check(conn, now_ts):
@@ -170,6 +172,8 @@ def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
             pending["type"] = "state"
             pending["account"] = random.choice(accounts)
         set_state(conn, "challenge", pending)
+        log_activity(conn, "challenge_issued",
+                     f"{pending['id']} {pending['type']}" + (f" {pending['account']}" if pending.get("account") else ""), now_ts)
     if pending is None:
         return None
     if pending["type"] == "state":
@@ -209,19 +213,24 @@ def answer_challenge(conn, body, now_ts):
             offset = reported - replay
             add_alert(conn, "db_edited_without_log", f"{account}:{offset}", "db_edited_without_log",
                       f"{account} bank balance {reported}, witness replay {replay}, offset {offset}", now_ts)
+            log_activity(conn, "challenge_failed", f"{pending['id']} state {account}: bank {reported} vs replay {replay}", now_ts)
             return {"status": "mismatch"}
         _resolve(conn, ["missed_challenge"])
+        log_activity(conn, "challenge_ok", f"{pending['id']} state {account} = {reported}", now_ts)
         return {"status": "ok"}
     if body.get("latest_hash") != last_hash:
         add_alert(conn, "challenge_mismatch", pending["id"], "entry_edited", "agent and witness disagree on latest hash", now_ts)
+        log_activity(conn, "challenge_failed", f"{pending['id']} hash mismatch at seq {last_seq}", now_ts)
         return {"status": "mismatch"}
     _resolve(conn, ["missed_challenge"])
+    log_activity(conn, "challenge_ok", f"{pending['id']} hash at seq {last_seq}", now_ts)
     return {"status": "ok"}
 
 def challenge_check(conn, now_ts):
     pending = get_state(conn, "challenge")
     if pending and now_ts > pending["deadline"]:
-        add_alert(conn, "missed_challenge", pending["id"], "agent_silenced", "no answer to hash challenge", now_ts)
+        add_alert(conn, "missed_challenge", pending["id"], "agent_silenced", f"no answer to {pending['type']} challenge", now_ts)
+        log_activity(conn, "challenge_missed", f"{pending['id']} {pending['type']}", now_ts)
         set_state(conn, "challenge", None)
 
 def verify_range(conn, from_seq, to_seq):
@@ -263,4 +272,4 @@ def status(conn, layers):
     }
 
 def list_alerts(conn):
-    return [dict(r) for r in conn.execute("SELECT kind, ref, tamper_type, detail, time FROM alerts ORDER BY id")]
+    return [dict(r) for r in conn.execute("SELECT kind, ref, tamper_type, detail, time, resolved FROM alerts ORDER BY id")]

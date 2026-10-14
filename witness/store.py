@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS events (
     body TEXT NOT NULL,
     received REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    time REAL NOT NULL,
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -92,3 +98,14 @@ def add_alert(conn, kind, ref, tamper_type, detail, now_ts):
             "INSERT OR IGNORE INTO alerts (kind, ref, tamper_type, detail, time) VALUES (?, ?, ?, ?, ?)",
             (kind, str(ref), tamper_type, detail, now_ts),
         )
+
+
+ACTIVITY_KEEP = 2000
+
+
+def log_activity(conn, kind, detail, now_ts):
+    # Liveness feed for the auditor view (heartbeats, challenges). Old rows are pruned; alerts never are.
+    with conn:
+        cur = conn.execute("INSERT INTO activity (time, kind, detail) VALUES (?, ?, ?)", (now_ts, kind, detail))
+        if cur.lastrowid % 200 == 0:
+            conn.execute("DELETE FROM activity WHERE id <= ?", (cur.lastrowid - ACTIVITY_KEEP,))
