@@ -36,3 +36,9 @@
 - Events path: producers write to a spool, the agent signs and sends `POST /events`; wrappers never hold the agent key. `/events` gains a `detail` field.
 - File commands trip only on log paths; editors always trip.
 - Team access changed: `coc-*` commands and the revert key are gone. The team uses `<cmd> --<profile-id>` (per-platform secret, scrypt hash only); guarded commands and paths come from config.
+
+## Layer 3 build
+- Break glass replaced by quarantine: trigger = 45 s without the witness (network cut). Capture → seal → site down → lock out everyone incl. root → QUARANTINED; never reboot.
+- Unlock = 2 of 3 key-holder approvals on the auditor view → witness-signed command for that quarantine id. Shamir is the production path.
+- Routes: `/quarantine/report|approve|poll` replace `/breakglass/*`.
+- Agent keeps sealing locally while the network is cut.

@@ -11,7 +11,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from shared import export_public_key
-from witness import checks, events, records
+from witness import checks, events, quarantine, records
 from witness.store import connect, get_state, init_db, set_state
 
 DEFAULT_LAYERS = Path(__file__).resolve().parents[1] / "config" / "layers.yaml"
@@ -46,6 +46,8 @@ def _check_loop(db_path, config, stop):
             if config["checks"]["B"]:
                 checks.silence_check(conn, checks.now())
                 checks.challenge_check(conn, checks.now())
+                if config["layers"].get(3):
+                    quarantine.presume(conn, checks.now(), config)
         finally:
             conn.close()
         tick += 1
@@ -57,7 +59,8 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     init_db(db_path)
     config = load_config(layers_path)
     key_path = os.environ.get("WITNESS_KEY_PATH") or os.path.splitext(db_path)[0] + ".key"
-    witness_public_key = export_public_key(load_or_create_key(key_path))
+    witness_key = load_or_create_key(key_path)  # signs Layer 3 unlock commands; never printed or sent
+    witness_public_key = export_public_key(witness_key)
     stop = threading.Event()
 
     @asynccontextmanager
@@ -124,6 +127,18 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
     @app.get("/timeline")
     def get_timeline(since: float = 0, conn=Depends(get_conn)):
         return {"events": events.timeline(conn, since)}
+
+    @app.post("/quarantine/report")
+    def post_quarantine_report(body: dict = Body(...), conn=Depends(get_conn)):
+        return quarantine.report(conn, body, checks.now(), config, witness_key)
+
+    @app.post("/quarantine/approve")
+    def post_quarantine_approve(body: dict = Body(...), conn=Depends(get_conn)):
+        return quarantine.approve(conn, body.get("holder"), checks.now(), witness_key)
+
+    @app.get("/quarantine/poll")
+    def get_quarantine_poll(platform_id: str, conn=Depends(get_conn)):
+        return {"command": quarantine.poll(conn, platform_id)}
 
     @app.get("/mismatches")
     def get_mismatches(conn=Depends(get_conn)):

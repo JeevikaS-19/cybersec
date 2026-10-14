@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 
 from shared import GENESIS_PREV_HASH, hash_entry, verify_signature
-from witness import records
+from witness import quarantine, records
 from witness.classify import for_rejection
 from witness.store import add_alert, get_state, log_activity, set_state
 
@@ -286,9 +286,9 @@ def status(conn, layers):
         "layers": {
             "1": ("tripped" if "layer1_tripwire" in kinds else "on") if layers.get(1) else "off",
             "2": "on" if layers.get(2) else "off",
-            "3": "on" if layers.get(3) else "off",
+            "3": ("quarantined" if (get_state(conn, "quarantine") or {}).get("active") else "on") if layers.get(3) else "off",
         },
-        "state": "alert" if kinds else "normal",
+        "state": "quarantined" if (get_state(conn, "quarantine") or {}).get("active") else ("alert" if kinds else "normal"),
         "last_entry_seq": last["seq"] if last else 0,
         "last_seen": hb.get("ts") or "",
         # Screen 0 of the auditor view
@@ -299,7 +299,7 @@ def status(conn, layers):
         "last_verified": {"seq": last["seq"], "time": last["timestamp"]} if last else None,
         "last_sweep": get_state(conn, "last_sweep"),
         "server_time": now(),
-        "quarantine": get_state(conn, "quarantine"),  # filled by Layer 3
+        "quarantine": quarantine.public_view(conn),
     }
 
 def list_alerts(conn):

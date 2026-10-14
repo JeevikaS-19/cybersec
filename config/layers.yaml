@@ -17,3 +17,24 @@ layer1:
   file_commands: [rm, mv, cp, sed, truncate, shred, cat]    # trip inside protected_paths without the profile-id
   watch_cd: true               # cd into a protected path is reported
   profiles_file: /etc/coc/profiles   # profile-id hashes per platform (python -m layers.l1_tripwire.profiles add <platform>)
+
+layer3:
+  after_seconds: 45            # no contact with the witness for this long = quarantine
+  dry_run: true                # true = record the commands below without running them (set false on the real server)
+  evidence_dir: /var/lib/coc/quarantine
+  users: auto                  # root + every account with a login shell; or a list
+  capture:                     # 1 capture (never reboot anywhere)
+    - ps aux
+    - ss -tnp
+    - who
+  site_down: []                # 3 platform hooks, e.g. "docker compose -f /opt/bank/docker-compose.yml stop frontend"
+  site_up: []
+  lockout:                     # 4 lock everyone out, end their sessions
+    - touch /etc/nologin
+    - passwd -l {user}
+    - loginctl terminate-user {user}
+  unlock:                      # reversed after a witness-signed unlock (2 of 3 key holders)
+    - passwd -u {user}
+    - rm -f /etc/nologin
+  key_holders: [SOC lead, Auditor, Compliance officer]
+  approvals_needed: 2

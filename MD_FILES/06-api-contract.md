@@ -26,7 +26,8 @@ All amounts: **integer paise**. All timestamps: ISO 8601 UTC string. All keys, h
 | Sweep response | `{challenge_id, type, records}` | agent key |
 | Layer event | every event field except `signature` | agent key |
 | Evidence bundle (in vault) | the bundle JSON except `signature` | agent key |
-| Break-glass command | `{command_id, action, issued_at, secret}` (`secret` only on unlock) | witness key |
+| Quarantine report | `{platform_id, quarantine_id, state, started_at, unverified, evidence_hash}` | agent key |
+| Unlock command | `{command_id, action, platform_id, quarantine_id, issued_at}` | witness key |
 
 **Genesis:** `GENESIS_PREV_HASH = base64.b64encode(b"\x00" * 32)` = `"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`, in `shared/`.
 
@@ -136,27 +137,29 @@ Every Layer 1/2/3 event and every evidence bundle reaches the witness here, so t
 
 ---
 
-## Break glass — Layer 3 (Step 10) — log-server polls
+## Quarantine — Layer 3 (Step 10) — log-server polls
 
-### `POST /breakglass/panic` (dashboard, SOC)
+### `POST /quarantine/report` (agent, signed with the agent key)
 ```json
-{ "reason": "manual panic", "by": "soc-lead" }
+{ "platform_id": "log-server-1", "quarantine_id": "q-6b0d1277", "state": "quarantined" | "released",
+  "started_at": 1792000000, "unverified": 19, "evidence_hash": "hex...", "signature": "base64..." }
 ```
+Signed fields: `{platform_id, quarantine_id, state, started_at, unverified, evidence_hash}` (integers only).
 
-### `POST /breakglass/unlock` (dashboard, auditor panel)
+### `POST /quarantine/approve` (auditor view)
 ```json
-{ "shares": [ { "holder": "auditor", "index": 1, "share": "base64..." }, { "holder": "legal", "index": 3, "share": "base64..." } ] }
+{ "holder": 0 }
 // response
-{ "status": "unlock_issued" } | { "status": "error", "reason": "not_enough_shares" }
+{ "status": "ok", "approved": 1, "needed": 2 }
 ```
-The witness reconstructs the secret from any 2 shares and queues a signed unlock command. Shares are never typed on the frozen log server.
 
-### `GET /breakglass/poll?platform_id=log-server-1`
+### `GET /quarantine/poll?platform_id=log-server-1`
 ```json
 { "command": null }
-{ "command": { "command_id": "bg-3", "action": "freeze" | "unlock", "issued_at": "...", "secret": "base64... (unlock only)", "signature": "base64..." } }
+{ "command": { "command_id": "u-1a2b", "action": "unlock", "platform_id": "log-server-1", "quarantine_id": "q-6b0d1277",
+               "issued_at": "...", "signature": "base64 (witness key)" } }
 ```
-Log server verifies the witness signature, and for unlock checks `sha256(secret)` against its stored hash, then reverses steps 5, 4, 3 and reports via `POST /events` (`state: normal`). Freeze/FROZEN progress is also reported via `POST /events`.
+Issued only after `approvals_needed` approvals **and** the server's report for that quarantine id. `/status.quarantine` carries `active, since, confirmed, id, unverified, holders, needed, unlock_issued`.
 
 ---
 

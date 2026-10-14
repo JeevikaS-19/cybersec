@@ -71,13 +71,14 @@ The test code is written during the event (Claude Code writes and runs them). Th
 | T6a | Direct edit of a log record (A2) | Flagged immediately from auditd, not at the next heartbeat; bundle has before, after, diff, who |
 | T6b | Trigger repeated Layer 2 failures | Escalates to Layer 3 per config |
 
-## Layer 3 · Break glass (Step 10)
+## Layer 3 · Quarantine (Step 10)
 | ID | Simulate | Expected |
 |---|---|---|
-| T7a | Edit `/etc/sudoers` (A9); also test the panic button | Steps run in order (capture → push → isolate → freeze → lock out → FROZEN), no reboot, attacker session killed |
-| T7b | Unlock with 1 share, then with each pair of 2 (A10) | 1 fails; any 2 succeed; unlock reverses 5, 4, 3 and is logged |
-| T7c | While FROZEN, try to write a log or reach anything but vault + witness | Denied |
-| T7d | Send an unlock command with a bad witness signature or wrong secret | Refused, stays FROZEN |
+| T7a | Cut the network between log server and witness for 45 s | Server runs capture → seal → site down → lock out (root included) → QUARANTINED, in that order, no reboot; witness shows quarantined, unverified = unknown |
+| T7b | Restore the network | Server reports and stays locked; witness shows the records sealed during the cut; they are shipped and verified |
+| T7c | One approval, then two | One: nothing. Two: witness-signed unlock; server verifies, unlocks, page back to Connected |
+| T7d | Unlock with a bad witness signature or another quarantine id; forged quarantine report | Refused, stays locked; forged report = `forged` alert |
+| T7e | A reboot-style command in `layer3` config | Refused at load |
 
 ## Witness hardening
 | ID | Simulate | Expected |

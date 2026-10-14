@@ -12,8 +12,8 @@ Standalone scripts in `attacks/`, one file per attack (`a1_nano.py`, `a2_fullpat
 | A6 | Edit DB balance directly, no log entry | change a balance in `victim/` SQLite | State challenge mismatch; Checks A and B stay green | Check C | T3b |
 | A7 | Edit the witness's stored entry | change one field in the witness DB | Self-check flags it within 5 s | Check A | T1b |
 | A8 | Delete the evidence | use log-server creds, then the vault admin creds, to delete a bundle | Denied: PutObject-only policy, then compliance-mode object lock | Vault | T4a, T4b |
-| A9 | Lock the admin out | edit `/etc/sudoers` / `/etc/shadow`, or lock the admin account | Layer 3 fires, capture → push → isolate → freeze → lock out → FROZEN; attacker's session killed | Layer 3 | T7a |
-| A10 | Unlock with one share | submit a single share on the unlock panel | Refused; two shares unlock | Layer 3 | T7b |
+| A9 | Cut the network to work unseen | unplug / firewall the log server from the witness for 45 s | Server quarantines itself: evidence sealed, site down, everyone incl. root logged out; witness shows it | Layer 3 | T7a, T7b |
+| A10 | Unlock with one approval or a forged command | one key holder approves; or send an unsigned unlock | Refused; two approvals → witness-signed unlock | Layer 3 | T7c, T7d |
 | A11 | SSH to the witness | `ssh witness` / port scan from `attacker` | Port 22 closed, only API port open | Witness hardening | T8a |
 | A12 | Kill the break-glass controller first | stop it before triggering A9 | Witness sees missed heartbeats; vault already holds everything streamed. Stated limit | Check B | T2a |
 | A13 | Cut the network before a bundle is pushed | drop log-server's network, then tamper | Silence on the witness. Bundle loss is an open TODO (local buffer). Stated limit | Check B | — |

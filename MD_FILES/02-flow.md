@@ -28,7 +28,7 @@ attacker  --(stolen admin creds)-->  log-server  --HTTP-->  witness  <--HTTP--  
 | `agent/` | chain + sign + send, heartbeat, challenge replies (runs in log-server) | Jeev |
 | `witness/` | verify, store, Checks A to C, layer events, break-glass relay | Jeev |
 | `layers/common/` | `events.py`, `evidence.py` (bundles + vault) | Jeev |
-| `layers/l2_hooks/`, `layers/l3_breakglass/` | Layer 2 and 3 | Jeev |
+| `layers/l2_hooks/`, `layers/l3_quarantine/` | Layer 2 and 3 | Jeev |
 | `layers/l1_tripwire/` | wrappers, profile-ids, `audit.rules` | 3rd member |
 | `victim/` | fake bank app writing logs + SQLite (runs in log-server) | Jeev writes the stub (Step 1), Jaganath extends after Round 1 |
 | `dashboard/` | SOC + auditor views | Jaganath |
@@ -153,12 +153,12 @@ auditd file-write events feed Layer 2, so a direct edit is flagged immediately a
 
 ---
 
-## Layer 3 · Break glass
+## Layer 3 · Quarantine
 
-### Step 10 · Break glass (Jeev, `layers/l3_breakglass/`)
-**Triggers:** changes to `/etc/passwd`, `/etc/shadow`, `/etc/sudoers(.d)`, admin `authorized_keys`, admin locked or removed from sudo; Layer 2 escalation; SOC panic button.
-**Response, in this exact order, never reboot:** 1 capture (processes, `ss -tnp`, sessions, auditd, log hashes) -> 2 push final bundle, hash to witness -> 3 isolate (iptables DROP except vault + witness) -> 4 freeze (`chattr +i` or read-only remount, stop writers) -> 5 lock out (lock interactive accounts, kill sessions) -> 6 report FROZEN.
-**Unlock:** Shamir 2-of-3 (`pycryptodome`), holders auditor / SOC lead / legal. Log server stores only a hash of the secret. Shares go into the dashboard, never the frozen server; the witness sends a signed unlock; the log server verifies and reverses 5, 4, 3, logging the unlock.
+### Step 10 · Quarantine on network cut (Jeev, `layers/l3_quarantine/`, `witness/quarantine.py`)
+**Trigger:** the agent has no successful contact with the witness for `layer3.after_seconds` (45). We assume the attacker cut the network to work unseen. Sealing keeps going locally during the cut.
+**Response, in this exact order, never reboot** (commands from `config/layers.yaml` → `layer3`, `dry_run` records instead of running): 1 capture (`ps`, `ss -tnp`, `who`, hashes of protected logs) -> 2 seal locally (`evidence_dir/<id>/evidence.json` + sha256, `chattr +a`) -> 3 site down (platform hooks) -> 4 lock out every interactive user incl. root (`/etc/nologin`, `passwd -l`, `loginctl terminate-user`) -> 5 QUARANTINED. Each step is a Layer 3 event in the spool, shipped when the network is back.
+**Witness:** presumes quarantine after 45 s of silence (it reports, it never locks anything). When the network is back the server sends a signed report (id, records sealed during the cut) and **stays locked**. 2 of 3 key holders press Approve on the auditor view; the witness signs `{command_id, action: unlock, platform_id, quarantine_id, issued_at}` with its own key; the agent verifies it with the `witness_public_key` it got at registration, reverses 4 and 3, reports `released`. Approvals are buttons for the demo; production = Shamir shares.
 
 ### Step 11 · Dashboard additions (Jaganath, `dashboard/`)
 SOC: live timeline color-coded by layer, tamper type on every alert, state normal / alert / FROZEN, panic button. Auditor: bundle list with verification status (signature valid, hash matches witness), before / after / diff / who per incident, unlock panel (enter shares).

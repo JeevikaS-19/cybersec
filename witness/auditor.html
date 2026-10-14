@@ -72,7 +72,7 @@ pre.diff .add{color:var(--green)}pre.diff .del{color:var(--red)}
 .quar{font-size:28px;font-weight:800;color:var(--red);margin:0 0 18px}
 .ev{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media (max-width:760px){.ev{grid-template-columns:1fr}}
-.holders td{font-size:18px}
+.holders td{font-size:17px;padding:5px 10px}.feed li{line-height:1.6}
 .pill{font:700 13px var(--mono);padding:3px 10px;border-radius:999px}
 .pill.pending{background:var(--grey-bg);color:var(--muted)}.pill.approved{background:var(--green-bg);color:var(--green)}
 button.ap{font:600 15px var(--sans);padding:7px 16px;border-radius:8px;border:1px solid var(--green);background:transparent;color:var(--green);cursor:pointer}
@@ -188,22 +188,31 @@ function screen2() {
 }
 
 function screen3() {
-  const q = S.quarantine;
+  const q = S.quarantine, last = events.filter((e) => e.layer === 3);
   if (!q || !q.active) {
-    return `<h2>Layer 3 · Quarantine</h2><p class="sub">Not triggered. If the server loses contact with the witness for ${q && q.after ? q.after : 45} s, it quarantines itself: all users logged out, evidence sealed locally, 2 of 3 key holders needed to unlock.</p>`;
+    const rel = [...last].reverse().find((e) => e.trigger === "quarantine:released");
+    return `<h2>Layer 3 · Quarantine</h2><p class="sub">Not active. If the server loses contact with the witness for 45 s, it quarantines itself: evidence sealed locally, site down, every user logged out (root included), 2 of 3 key holders needed to unlock.</p>
+    ${rel ? `<p class="sub">Last quarantine <b>${esc(rel.detail.quarantine_id)}</b> released at ${isoClock(rel.time)} after key-holder approval.</p>` : ""}`;
   }
-  const lv = S.last_verified;
-  const holders = (q.holders || [{ name: "SOC lead" }, { name: "Auditor" }, { name: "Compliance officer" }]).map((h, i) =>
-    `<tr><td>${esc(h.name)}</td><td><span class="pill ${h.approved ? "approved" : "pending"}">${h.approved ? "Approved" : "Pending"}</span></td><td><button class="ap" data-holder="${i}" ${h.approved || !q.can_approve ? "disabled" : ""}>Approve</button></td></tr>`).join("");
+  const lv = S.last_verified, approved = q.holders.filter((h) => h.approved).length;
+  const holders = q.holders.map((h, i) =>
+    `<tr><td>${esc(h.name)}</td><td><span class="pill ${h.approved ? "approved" : "pending"}">${h.approved ? "Approved" : "Pending"}</span></td><td><button class="ap" data-holder="${i}" ${h.approved ? "disabled" : ""}>Approve</button></td></tr>`).join("");
+  const acts = last.filter((e) => e.detail && e.detail.quarantine_id === q.id && e.trigger === "quarantine:locked");
+  const actions = acts.length ? [...(acts[0].detail.site_down || []), ...(acts[0].detail.lockout || [])] : [];
+  const dry = acts.length && acts[0].detail.dry_run;
+  const status = q.unlock_issued ? "Unlock signed by the witness. Waiting for the server to apply it…"
+    : approved >= q.needed ? "Approvals complete. Unlock will be signed once the server reports in."
+    : `${q.needed} of ${q.holders.length} approvals needed to unlock.`;
   return `<p class="quar">Banking server has quarantined itself. All users logged out.</p>
-  <p class="sub">Reported by the witness: no contact since ${q.since ? clock(q.since) : "—"}. The server locked itself down; the witness could not, the network is cut.</p>
+  <p class="sub">${q.confirmed ? `Server confirmed quarantine <b>${esc(q.id)}</b>.` : "Reported by the witness: the server's policy locks it down after " + q.after + " s without contact."} No contact since ${clock(q.since)}. The witness did not do the lockdown; the network was cut.</p>
   <div class="ev">
     <div class="stat"><div class="k">Verified and stored on witness</div><div class="v ok">#1 – #${lv ? lv.seq : 0}</div><div class="k">${lv ? "up to " + isoClock(lv.time) : ""}</div></div>
-    <div class="stat"><div class="k">Unverified since cut</div><div class="v bad">${q.unverified == null ? "unknown" : q.unverified + " records"}</div><div class="k">${q.unverified == null ? "held on the server until the network is back" : "received, being verified"}</div></div>
+    <div class="stat"><div class="k">Unverified since cut</div><div class="v bad">${q.unverified == null ? "unknown" : q.unverified + " records"}</div><div class="k">${q.unverified == null ? "held on the server until the network is back" : "received after reconnect, being verified"}</div></div>
   </div>
-  <h3 style="margin-top:22px">Key holders</h3>
+  ${actions.length ? `<h3 style="margin-top:20px">What the server did${dry ? ' <span class="empty">(dry run: recorded, not executed)</span>' : ""}</h3><ul class="feed">${actions.map((r) => `<li><span class="okc">✓</span> ${esc(r.cmd)}</li>`).join("")}</ul>` : ""}
+  <h3 style="margin-top:20px">Key holders</h3>
   <table class="holders"><tbody>${holders}</tbody></table>
-  <p class="need">2 of 3 approvals needed to unlock.</p>`;
+  <p class="need">${status}</p>`;
 }
 
 function renderMain() {

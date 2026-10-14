@@ -14,12 +14,14 @@ import requests
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from layers.common import events as layer_events
+from layers.l3_quarantine import quarantine as l3
 from shared import (
     GENESIS_PREV_HASH,
     export_public_key,
     generate_keypair,
     hash_entry,
     sign_payload,
+    verify_signature,
 )
 
 WITNESS_URL = os.environ.get("WITNESS_URL", "http://127.0.0.1:8000")
@@ -82,6 +84,8 @@ def register(conn, priv):
     )
     resp.raise_for_status()
     meta_set(conn, "key_id", resp.json()["key_id"])
+    if resp.json().get("witness_public_key"):
+        meta_set(conn, "witness_public_key", resp.json()["witness_public_key"])  # verifies Layer 3 unlocks
 
 
 def last_local_entry(conn):
@@ -251,20 +255,71 @@ def answer_challenge(conn, priv):
     requests.post(f"{WITNESS_URL}/challenge/response", json=body, timeout=TIMEOUT).raise_for_status()
 
 
+def check_quarantine(conn, last_contact):
+    # Layer 3 trigger: no successful contact with the witness for after_seconds.
+    if meta_get(conn, "quarantine") or not layer_events.layer_enabled(3):
+        return
+    after = l3.settings()["after_seconds"]
+    if time.monotonic() - last_contact < after:
+        return
+    from layers.l1_tripwire.trip import settings as l1_settings
+    record = l3.quarantine(f"no contact with the witness for {after:.0f} s", l1_settings()["protected_paths"])
+    record["reported"] = False
+    meta_set(conn, "quarantine", json.dumps(record))
+    print(f"QUARANTINED {record['id']}: {record['reason']}")
+
+
+def quarantine_contact(conn, priv):
+    # Once the witness is reachable again: report (stay locked) and wait for a witness-signed unlock.
+    raw = meta_get(conn, "quarantine")
+    if not raw:
+        return
+    record = json.loads(raw)
+    if not record.get("reported"):
+        unverified = conn.execute("SELECT COUNT(*) FROM entries WHERE sent = 0").fetchone()[0]
+        _report(priv, record, "quarantined", unverified)
+        record["reported"] = True
+        meta_set(conn, "quarantine", json.dumps(record))
+    resp = requests.get(f"{WITNESS_URL}/quarantine/poll", params={"platform_id": PLATFORM_ID}, timeout=TIMEOUT)
+    cmd = resp.json().get("command")
+    if not cmd or cmd.get("action") != "unlock" or cmd.get("quarantine_id") != record["id"]:
+        return
+    witness_key = meta_get(conn, "witness_public_key")
+    signed = {k: cmd.get(k) for k in ("command_id", "action", "platform_id", "quarantine_id", "issued_at")}
+    if not witness_key or not verify_signature(witness_key, signed, cmd.get("signature", "")):
+        print("unlock command rejected: bad witness signature")
+        return
+    l3.release(record)
+    meta_set(conn, "quarantine", "")
+    _report(priv, record, "released", 0)
+    print(f"RELEASED {record['id']}")
+
+
+def _report(priv, record, state, unverified):
+    payload = {"platform_id": PLATFORM_ID, "quarantine_id": record["id"], "state": state,
+               "started_at": record["started_at"], "unverified": unverified, "evidence_hash": record["evidence_hash"]}
+    body = dict(payload, signature=sign_payload(priv, payload))
+    requests.post(f"{WITNESS_URL}/quarantine/report", json=body, timeout=TIMEOUT).raise_for_status()
+
+
 def main():
     conn = open_db()
     priv = load_or_create_key(conn)
     last_heartbeat = last_poll = 0.0
+    last_contact = time.monotonic()
     while True:
         backlog = False
+        if meta_get(conn, "key_id"):
+            sync_bank(conn, priv)  # sealing is local: it keeps going while the network is cut
         try:
-            if meta_get(conn, "key_id") is None:
+            if meta_get(conn, "key_id") is None or meta_get(conn, "witness_public_key") is None:
                 register(conn, priv)
             now = time.monotonic()
             if now - last_heartbeat >= HEARTBEAT_SECONDS:
                 send_heartbeat(priv)
                 last_heartbeat = now
-            sync_bank(conn, priv)
+                last_contact = now
+            quarantine_contact(conn, priv)
             backlog = send_pending(conn) == SEND_BATCH
             ship_events(conn, priv)
             if now - last_poll >= CHALLENGE_SECONDS:
@@ -272,6 +327,7 @@ def main():
                 last_poll = now
         except requests.RequestException as exc:
             print(f"witness unreachable: {exc.__class__.__name__}")
+        check_quarantine(conn, last_contact)
         if not backlog:  # catch up at full speed, idle at 1 s
             time.sleep(1)
 

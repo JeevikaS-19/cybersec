@@ -92,32 +92,16 @@ Present the wrappers as detection, with auditd as the real enforcement.
 
 **Module**: `layers/l2_hooks/`
 
-## Layer 3: break glass
+## Layer 3: quarantine
 
-**Idea.** An emergency brake. If the attacker locks the admin or company out, the system freezes and locks **everyone** out, attacker included, until two of three key holders unlock it.
+**Idea.** An attacker who has been seen cuts the network so the witness goes blind. The log server treats losing the witness as the alarm: after 45 s without contact it quarantines itself, so the attacker is locked out with everyone else and the evidence is sealed before they can touch it.
 
-**Triggers**
-- Admin lockout signals: changes to `/etc/passwd`, `/etc/shadow`, `/etc/sudoers`, `/etc/sudoers.d/`, or admin `authorized_keys`; the admin account being locked or removed from sudo
-- Escalation from Layer 2 (per config)
-- Manual panic button in the SOC view
-
-**Response, in this exact order** (capture before destroying anything; **do not reboot**, a reboot wipes live evidence and unlocks auditd rules)
-1. **Capture**: process list, network connections (`ss -tnp`), logged-in sessions, latest auditd records, hashes of all log files
-2. **Push** the final evidence bundle to the vault, hash to the witness
-3. **Isolate**: iptables default DROP, allowing only the vault and witness
-4. **Freeze**: make the log directory immutable (`chattr +i`, or remount read-only if chattr failed in Phase 0) and stop writers
-5. **Lock out**: lock all interactive accounts and kill their sessions
-6. Report "FROZEN" to the witness and dashboard
-
-**Unlock: 2-of-3 split key**
-- Use Shamir's Secret Sharing (`pycryptodome`, `Crypto.Protocol.SecretSharing.Shamir`). Three shares, any two reconstruct.
-- Holders for the demo: **auditor, SOC lead, legal**.
-- The log server stores only a hash of the secret.
-- Shares are entered through the dashboard/witness, never typed on the frozen log server. The witness sends a signed unlock request; the log server verifies, then reverses steps 5, 4, 3 and logs the unlock as its own event.
-
-**Known limitation to state honestly:** an attacker who already has root could try to kill the break-glass controller before it fires. The witness detects this through missed heartbeats, and the vault already holds everything streamed up to that point.
-
-**Module**: `layers/l3_breakglass/`
+**Build** (`layers/l3_quarantine/`, witness side in `witness/quarantine.py`; full spec in `02-flow.md` Step 10)
+- Trigger: no successful contact with the witness for `layer3.after_seconds` (45).
+- Fixed order, never reboot: capture → seal locally → site down (platform hooks) → lock out every interactive user incl. root and end sessions → QUARANTINED. All commands from `config/layers.yaml`; `dry_run` records them instead.
+- The agent keeps sealing records locally during the cut and ships them when the network is back.
+- Unlock: the server stays locked after reconnecting. 2 of 3 key holders approve on the witness; the witness signs an unlock for that quarantine id with its own key; the agent verifies it and reverses the lockout and site-down.
+- Honest limits: whoever controls the hypervisor/console can always get in; approvals are buttons for the demo (production: Shamir 2-of-3 so no single party holds the secret).
 
 ## Witness: no SSH
 
@@ -153,7 +137,7 @@ layers/
     profiles.py        # profile-id hashes per platform
   l2_hooks/
     hooks.py
-  l3_breakglass/
+  l3_quarantine/
     triggers.py
     controller.py      # capture, push, isolate, freeze, lock
     shamir_unlock.py
