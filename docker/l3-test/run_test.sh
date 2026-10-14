@@ -1,6 +1,8 @@
 #!/bin/bash
 # Real Layer 3 lockout test, run as root inside the l3-test container:
-#   docker build -t coc-l3-test -f docker/l3-test/Dockerfile .  &&  docker run --rm coc-l3-test
+#   docker build -t coc-l3-test -f docker/l3-test/Dockerfile .
+#   docker run --rm --cap-add LINUX_IMMUTABLE --mount type=volume,dst=/var/lib/coc coc-l3-test
+# (the capability + volume let chattr +a make the evidence folder append-only)
 set -u
 cd /opt/coc
 export PYTHONPATH=/opt/coc COC_L3_DRY_RUN=0 COC_SPOOL=/tmp/spool COC_EVIDENCE_DIR=/var/lib/coc/quarantine
