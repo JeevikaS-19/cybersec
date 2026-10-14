@@ -40,7 +40,8 @@ def test_quarantine_runs_in_fixed_order_and_seals_evidence(l3env):
     assert triggers == ["quarantine:captured", "quarantine:locked", "quarantine:quarantined"]
     assert rec["users"] == ["root", "jeevika", "attacker"]
     # lockout covers every interactive user, root included, and ends their sessions
-    assert "passwd -l root" in rec["actions"] and "loginctl terminate-user attacker" in rec["actions"]
+    assert "passwd -l root" in rec["actions"] and "usermod --expiredate 1 attacker" in rec["actions"]
+    assert any(a.startswith("end login sessions") for a in rec["actions"])
     assert rec["actions"].index("touch /etc/nologin") < rec["actions"].index("passwd -l root")
     assert not any(n in " ".join(rec["actions"]) for n in ("reboot", "shutdown", "poweroff"))
     vault = l3env / "vault" / rec["id"]
@@ -100,3 +101,29 @@ def test_forged_quarantine_report_is_rejected(witness):
     body = {"platform_id": a.platform_id, "quarantine_id": "q-x", "state": "released", "started_at": 1,
             "unverified": 0, "evidence_hash": "abc", "signature": "AAAA"}
     assert requests.post(f"{witness.url}/quarantine/report", json=body, timeout=5).json() == {"status": "rejected"}
+
+
+def _fake_proc(root, pid, ppid, uid, tty, auid, comm):
+    d = root / str(pid)
+    d.mkdir(parents=True)
+    (d / "stat").write_text(f"{pid} ({comm}) S {ppid} {pid} {pid} {tty} -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0\n")
+    (d / "status").write_text(f"Name:\t{comm}\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n")
+    (d / "loginuid").write_text(str(auid))
+
+
+def test_end_sessions_kills_login_processes_but_never_services_or_itself(tmp_path, monkeypatch):
+    from layers.l3_quarantine import sessions
+
+    proc = tmp_path / "proc"
+    unset = sessions.UNSET_AUID
+    _fake_proc(proc, 1, 0, 0, 0, unset, "init")
+    _fake_proc(proc, 200, 1, 0, 0, unset, "sshd")              # service: no tty, no login uid -> keep
+    _fake_proc(proc, 300, 200, 0, 34816, 1001, "bash")         # root shell from an attacker login -> kill
+    _fake_proc(proc, 301, 300, 1001, 0, 1001, "nc")            # attacker's reverse shell, no tty -> kill (auid)
+    _fake_proc(proc, 400, 1, 1000, 34817, 1000, "bash")        # admin's shell -> kill
+    _fake_proc(proc, 500, 1, 0, 34818, 0, "python")            # the agent running quarantine -> keep (self)
+    monkeypatch.setattr(sessions.os, "getpid", lambda: 500)
+    found = sessions.end_login_sessions(dry_run=True, proc=str(proc))
+    assert sorted(p["pid"] for p in found) == [300, 301, 400]
+    only_attacker = sessions.login_processes(str(proc), users=[1001])
+    assert [p["pid"] for p in only_attacker] == [301]

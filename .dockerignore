@@ -1,0 +1,7 @@
+**/__pycache__
+demo/.run
+coc-spool
+keys
+*.db
+*.key
+.git

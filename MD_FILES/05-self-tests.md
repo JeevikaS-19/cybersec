@@ -79,6 +79,7 @@ The test code is written during the event (Claude Code writes and runs them). Th
 | T7c | One approval, then two | One: nothing. Two: witness-signed unlock; server verifies, unlocks, page back to Connected |
 | T7d | Unlock with a bad witness signature or another quarantine id; forged quarantine report | Refused, stays locked; forged report = `forged` alert |
 | T7e | A reboot-style command in `layer3` config | Refused at load |
+| T7f | Real lockout as root (`docker build -t coc-l3-test -f docker/l3-test/Dockerfile . && docker run --rm coc-l3-test`) | Root/admin/attacker locked + expired, SSH key logins refused, every terminal session gone, agent and sshd alive; unlock restores logins |
 
 ## Witness hardening
 | ID | Simulate | Expected |

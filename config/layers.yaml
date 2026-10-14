@@ -40,11 +40,13 @@ layer3:
     - who
   site_down: []                # 3 platform hooks, e.g. "docker compose -f /opt/bank/docker-compose.yml stop frontend"
   site_up: []
-  lockout:                     # 4 lock everyone out, end their sessions
+  lockout:                     # 4 lock everyone out (run for every user, root included)
     - touch /etc/nologin
-    - passwd -l {user}
-    - loginctl terminate-user {user}
+    - passwd -l {user}               # no password logins
+    - usermod --expiredate 1 {user}  # account expired: SSH keys, su and sudo refused too
+  end_sessions: true           # then kill every login-session process (tty or login uid), never the agent itself
   unlock:                      # reversed after a witness-signed unlock (2 of 3 key holders)
+    - usermod --expiredate '' {user}
     - passwd -u {user}
     - rm -f /etc/nologin
   key_holders: [SOC lead, Auditor, Compliance officer]

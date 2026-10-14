@@ -2,7 +2,8 @@
 
 Trigger: no successful contact with the witness for layer3.after_seconds (default 45). We assume the attacker
 cut the network to work unseen. Order is fixed, and nothing here ever reboots:
-    1 capture  -> 2 seal locally -> 3 site down -> 4 lock out every interactive user (incl. root) -> 5 QUARANTINED
+    1 capture  -> 2 seal locally -> 3 site down -> 4 lock out every interactive user (incl. root: password
+    locked, account expired so SSH keys stop working too) and end every login session -> 5 QUARANTINED
 Unlock: only a witness-signed command (issued after 2 of 3 key holders approve) for this quarantine id.
 All commands come from config/layers.yaml (layer3). dry_run records them instead of running them.
 """
@@ -17,10 +18,11 @@ import time
 from pathlib import Path
 
 from layers.common import events
+from layers.l3_quarantine import sessions
 
 DEFAULTS = {
     "after_seconds": 45, "dry_run": True, "evidence_dir": "/var/lib/coc/quarantine", "users": "auto",
-    "capture": [], "site_down": [], "site_up": [], "lockout": [], "unlock": [],
+    "capture": [], "site_down": [], "site_up": [], "lockout": [], "unlock": [], "end_sessions": True,
 }
 NEVER = ("reboot", "shutdown", "poweroff", "halt", "init 0", "init 6", "systemctl kexec")
 
@@ -57,6 +59,20 @@ def interactive_users(passwd="/etc/passwd"):
         import getpass
         users = ["root", getpass.getuser()]  # no /etc/passwd (dry run on a dev machine)
     return users
+
+
+def _uids(users):
+    try:
+        import pwd
+    except ImportError:
+        return []
+    out = []
+    for u in users:
+        try:
+            out.append(pwd.getpwnam(u).pw_uid)
+        except KeyError:
+            pass
+    return out
 
 
 def _expand(templates, users):
@@ -124,6 +140,9 @@ def quarantine(reason, protected_paths=(), passwd="/etc/passwd"):
     site = _run(_expand(cfg["site_down"], users), dry)
     # 4 lock out every interactive user, root included, and end their sessions
     locked = _run(_expand(cfg["lockout"], users), dry)
+    ended = sessions.end_login_sessions(dry, _uids(users)) if cfg["end_sessions"] else []
+    locked.append({"cmd": f"end login sessions: {len(ended)} processes" + (" (dry run)" if dry else ""), "ran": not dry,
+                   "rc": 0, "killed": ended[:50]})
     _step("locked", {"site_down": site, "lockout": locked, "dry_run": dry}, qid)
     # 5 report
     record = {"id": qid, "reason": reason, "started_at": started, "evidence_hash": evidence_hash,
