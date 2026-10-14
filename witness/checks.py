@@ -1,5 +1,6 @@
 """Witness logic for Check A (sealed chain) and Check B (outside witness). No HTTP here."""
 
+import os
 import random
 import secrets
 import time
@@ -14,8 +15,8 @@ ENTRY_FIELDS = (
 )
 SILENCE_SECONDS = 15
 CHALLENGE_SECONDS = 5
-CHALLENGE_CHANCE = 0.2
-ALERT_WINDOW_SECONDS = 60
+CHALLENGE_CHANCE = float(os.environ.get("CHALLENGE_CHANCE", "0.2"))
+STATE_SHARE = float(os.environ.get("STATE_SHARE", "0.5"))
 A_KINDS = {
     "sequence_gap", "chain_break", "bad_signature", "unknown_key_id", "entry_edited",
     "entry_deleted", "entries_reordered", "challenge_mismatch", "bad_challenge_signature",
@@ -64,10 +65,16 @@ def _reject_reason(conn, entry, last):
         return "non_monotonic_timestamp"
     return None
 
+def _resolve(conn, kinds):
+    # Only alerts whose problem has ended are resolved; tamper evidence stays red.
+    marks = ",".join("?" for _ in kinds)
+    with conn:
+        conn.execute(f"UPDATE alerts SET resolved = 1 WHERE resolved = 0 AND kind IN ({marks})", tuple(kinds))
+
 def _replay_balances(conn, entry, now_ts):
     # Check C: the witness keeps its own balances and compares the reported ones.
     # Opening balance is inferred from the first entry seen per account (trust on first use).
-    seq, amount = entry["seq"], entry["amount_paise"]
+    amount = entry["amount_paise"]
     for account, reported, delta in (
         (entry["from_account"], entry["from_balance_paise"], -amount),
         (entry["to_account"], entry["to_balance_paise"], amount),
@@ -76,8 +83,9 @@ def _replay_balances(conn, entry, now_ts):
         before = row["balance_paise"] if row else reported - delta
         expected = before + delta
         if reported != expected:
-            add_alert(conn, "balance_misreported", f"{seq}:{account}", "balance_misreported",
-                      f"{account} reported {reported}, witness replay {expected}", now_ts)
+            offset = reported - expected
+            add_alert(conn, "balance_misreported", f"{account}:{offset}", "balance_misreported",
+                      f"{account} reported {reported}, witness replay {expected}, offset {offset}", now_ts)
         with conn:
             conn.execute("INSERT OR REPLACE INTO balances (account, balance_paise) VALUES (?, ?)", (account, expected))
 
@@ -134,6 +142,7 @@ def record_heartbeat(conn, body, now_ts):
         add_alert(conn, kind, f"{platform_id}:{ts}", tamper, reason, now_ts)
         return {"status": "rejected", "reason": reason}
     set_state(conn, "last_heartbeat", {"ts": ts, "recv": now_ts})
+    _resolve(conn, ["silence", "bad_heartbeat", "replayed_heartbeat"])
     return {"status": "ok"}
 
 def silence_check(conn, now_ts):
@@ -154,7 +163,7 @@ def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
             "key_id": row["key_id"],
             "deadline": now_ts + CHALLENGE_SECONDS,
         }
-        if state_allowed and accounts and random.random() < 0.5:
+        if state_allowed and accounts and random.random() < STATE_SHARE:
             pending["type"] = "state"
             pending["account"] = random.choice(accounts)
         set_state(conn, "challenge", pending)
@@ -166,9 +175,9 @@ def poll_challenge(conn, platform_id, now_ts, state_allowed=True):
 
 def answer_challenge(conn, body, now_ts):
     pending = get_state(conn, "challenge")
+    # Wrong, late or unsigned replies leave the challenge pending: only its deadline fails it.
     if not pending or pending["id"] != body.get("challenge_id") or now_ts > pending["deadline"]:
         return {"status": "mismatch"}
-    set_state(conn, "challenge", None)
     if body.get("type") != pending["type"]:
         return {"status": "mismatch"}
     if pending["type"] == "state":
@@ -183,21 +192,27 @@ def answer_challenge(conn, body, now_ts):
     last_seq = last["seq"] if last else 0
     last_hash = last["hash"] if last else GENESIS_PREV_HASH
     if body.get("last_seq") != last_seq:
-        # Agent is ahead or behind a queued send; not evidence of tampering.
+        # Agent is ahead or behind a queued send; keep waiting until the deadline.
         return {"status": "mismatch"}
+    # From here the reply is valid and answers the challenge.
+    set_state(conn, "challenge", None)
     if pending["type"] == "state":
-        row = conn.execute("SELECT balance_paise FROM balances WHERE account = ?", (body.get("account"),)).fetchone()
+        account = body.get("account")
+        row = conn.execute("SELECT balance_paise FROM balances WHERE account = ?", (account,)).fetchone()
         if row is None:
             return {"status": "mismatch"}
-        if body.get("balance_paise") != row["balance_paise"]:
-            add_alert(conn, "db_edited_without_log", pending["id"], "db_edited_without_log",
-                      f"{body.get('account')} bank balance {body.get('balance_paise')}, witness replay {row['balance_paise']}",
-                      now_ts)
+        reported, replay = body.get("balance_paise"), row["balance_paise"]
+        if reported != replay:
+            offset = reported - replay
+            add_alert(conn, "db_edited_without_log", f"{account}:{offset}", "db_edited_without_log",
+                      f"{account} bank balance {reported}, witness replay {replay}, offset {offset}", now_ts)
             return {"status": "mismatch"}
+        _resolve(conn, ["missed_challenge"])
         return {"status": "ok"}
     if body.get("latest_hash") != last_hash:
         add_alert(conn, "challenge_mismatch", pending["id"], "entry_edited", "agent and witness disagree on latest hash", now_ts)
         return {"status": "mismatch"}
+    _resolve(conn, ["missed_challenge"])
     return {"status": "ok"}
 
 def challenge_check(conn, now_ts):
@@ -225,7 +240,7 @@ def verify_range(conn, from_seq, to_seq):
     }
 
 def status(conn, layers):
-    kinds = {r["kind"] for r in conn.execute("SELECT kind FROM alerts WHERE time > ?", (now() - ALERT_WINDOW_SECONDS,))}
+    kinds = {r["kind"] for r in conn.execute("SELECT kind FROM alerts WHERE resolved = 0")}
     last = _last_accepted(conn)
     hb = get_state(conn, "last_heartbeat") or {}
     return {

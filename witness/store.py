@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     tamper_type TEXT,
     detail TEXT,
     time REAL NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0,
     UNIQUE (kind, ref)
 );
 CREATE TABLE IF NOT EXISTS balances (
@@ -55,6 +56,11 @@ def init_db(db_path):
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA)
+        # Databases created before the resolved column existed get it added here.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(alerts)")}
+        if "resolved" not in cols:
+            conn.execute("ALTER TABLE alerts ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
     finally:
         conn.close()
 
