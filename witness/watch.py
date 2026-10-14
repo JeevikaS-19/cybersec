@@ -16,7 +16,7 @@ def colour(value):
 def main():
     os.system("")  # turns on ANSI colours in the Windows console
     seen = set()
-    last_line = None
+    last_key = None
     while True:
         try:
             status = requests.get(f"{WITNESS_URL}/status", timeout=3).json()
@@ -26,11 +26,12 @@ def main():
             time.sleep(1)
             continue
 
-        line = "  ".join(f"Check {c}: {colour(v)}" for c, v in status["checks"].items())
-        line += f"  {DIM}state={status['state']} seq={status['last_entry_seq']}{RESET}"
-        if line != last_line:
-            print(line)
-            last_line = line
+        # Print only when checks or state change; seq is left out so it can't trigger a reprint.
+        key = (tuple(sorted(status["checks"].items())), status["state"])
+        if key != last_key:
+            line = "  ".join(f"Check {c}: {colour(v)}" for c, v in status["checks"].items())
+            print(f"{line}  {DIM}state={status['state']}{RESET}")
+            last_key = key
 
         for alert in alerts:
             key = (alert["kind"], alert["ref"])
