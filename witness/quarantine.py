@@ -6,10 +6,11 @@ import secrets
 from datetime import UTC, datetime
 
 from shared import sign_payload, verify_signature
+from witness import keyholders
 from witness.store import add_alert, get_state, log_activity, set_state
 
 REPORT_FIELDS = ("platform_id", "quarantine_id", "state", "started_at", "unverified", "evidence_hash")
-COMMAND_FIELDS = ("command_id", "action", "platform_id", "quarantine_id", "issued_at")
+COMMAND_FIELDS = ("command_id", "action", "platform_id", "quarantine_id", "issued_at", "secret")
 
 
 def _cfg(config):
@@ -42,8 +43,20 @@ def presume(conn, now_ts, config):
 def _issue_if_ready(conn, q, witness_key, now_ts):
     if q["command"] or not q["id"] or sum(h["approved"] for h in q["holders"]) < q["needed"]:
         return
+    secret = None
+    expected = keyholders.secret_hash(conn)
+    if expected:  # Shamir: the approvals' shares must rebuild the secret the log server knows the hash of
+        given = [h.pop("share") for h in q["holders"] if h.get("share")]
+        rebuilt = keyholders.combine(given[: q["needed"]], expected)
+        if rebuilt is None:
+            for h in q["holders"]:
+                h["approved"] = False
+            add_alert(conn, "bad_unlock_shares", f"{q['id']}:{now_ts}", None, "key-holder shares did not rebuild the unlock secret", now_ts)
+            log_activity(conn, "quarantine", "shares rejected: they don't rebuild the secret; approvals reset", now_ts)
+            return
+        secret = rebuilt.hex()
     cmd = {"command_id": "u-" + secrets.token_hex(4), "action": "unlock", "platform_id": q["platform_id"],
-           "quarantine_id": q["id"], "issued_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
+           "quarantine_id": q["id"], "issued_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "secret": secret}
     cmd["signature"] = sign_payload(witness_key, cmd)
     q["command"] = cmd
     log_activity(conn, "quarantine", f"unlock {q['id']} signed after {q['needed']} approvals", now_ts)
@@ -81,10 +94,14 @@ def report(conn, body, now_ts, config, witness_key):
     return {"status": "ignored"}
 
 
-def approve(conn, holder, now_ts, witness_key):
+def approve(conn, holder, now_ts, witness_key, share=None):
     q = get_state(conn, "quarantine")
     if not q or not q.get("active") or not isinstance(holder, int) or not 0 <= holder < len(q["holders"]):
         return {"status": "rejected"}
+    if keyholders.secret_hash(conn):
+        if not keyholders.valid_format(share):
+            return {"status": "rejected", "reason": "enter this holder's share (format: N-<32 hex>)"}
+        q["holders"][holder]["share"] = share.strip().lower()  # held only until the unlock is signed
     q["holders"][holder]["approved"] = True
     log_activity(conn, "quarantine", f"{q['holders'][holder]['name']} approved unlock", now_ts)
     _issue_if_ready(conn, q, witness_key, now_ts)
@@ -103,4 +120,7 @@ def public_view(conn):
     q = get_state(conn, "quarantine")
     if not q:
         return None
-    return {k: v for k, v in q.items() if k != "command"} | {"unlock_issued": bool(q.get("command"))}
+    view = {k: v for k, v in q.items() if k != "command"} | {"unlock_issued": bool(q.get("command"))}
+    view["holders"] = [{k: v for k, v in h.items() if k != "share"} for h in q["holders"]]
+    view["shares_required"] = bool(keyholders.secret_hash(conn))
+    return view

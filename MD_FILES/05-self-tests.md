@@ -79,7 +79,7 @@ The test code is written during the event (Claude Code writes and runs them). Th
 |---|---|---|
 | T7a | Cut the network between log server and witness for 45 s | Server runs capture → seal → site down → lock out (root included) → QUARANTINED, in that order, no reboot; witness shows quarantined, unverified = unknown |
 | T7b | Restore the network | Server reports and stays locked; witness shows the records sealed during the cut; they are shipped and verified |
-| T7c | One approval, then two | One: nothing. Two: witness-signed unlock; server verifies, unlocks, page back to Connected |
+| T7c | One share, a wrong share, then two right shares | One: nothing. Wrong: approvals reset, alert. Two right: witness-signed unlock carrying the rebuilt secret; server checks its hash, unlocks |
 | T7d | Unlock with a bad witness signature or another quarantine id; forged quarantine report | Refused, stays locked; forged report = `forged` alert |
 | T7e | A reboot-style command in `layer3` config | Refused at load |
 | T7f | Real lockout as root (`docker build -t coc-l3-test -f docker/l3-test/Dockerfile . && docker run --rm --cap-add LINUX_IMMUTABLE --mount type=volume,dst=/var/lib/coc coc-l3-test`) | Root/admin/attacker locked + expired, SSH key logins refused, every terminal session gone, agent and sshd alive; evidence folder append-only (`chattr +a`, needs `CAP_LINUX_IMMUTABLE` + a volume); unlock restores logins. **Result: 18/18 pass** |

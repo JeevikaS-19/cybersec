@@ -89,7 +89,7 @@ def test_witness_quarantine_flow_two_of_three_signed_unlock(witness, clock):
     requests.post(f"{witness.url}/quarantine/approve", json={"holder": 2}, timeout=5)
     cmd = poll()
     assert cmd["action"] == "unlock" and cmd["quarantine_id"] == "q-1234"
-    signed = {k: cmd[k] for k in ("command_id", "action", "platform_id", "quarantine_id", "issued_at")}
+    signed = {k: cmd[k] for k in ("command_id", "action", "platform_id", "quarantine_id", "issued_at", "secret")}
     assert verify_signature(reg["witness_public_key"], signed, cmd["signature"])
     assert _report(a, "released", "q-1234") == {"status": "ok"}
     s = _status(witness.url)
@@ -127,3 +127,38 @@ def test_end_sessions_kills_login_processes_but_never_services_or_itself(tmp_pat
     assert sorted(p["pid"] for p in found) == [300, 301, 400]
     only_attacker = sessions.login_processes(str(proc), users=[1001])
     assert [p["pid"] for p in only_attacker] == [301]
+
+
+def test_shamir_two_of_three_shares_rebuild_the_unlock_secret(witness, clock, tmp_path):
+    import hashlib
+
+    from shared import export_public_key
+    from witness import keyholders
+    from witness.checks import now
+
+    keyholders.init(witness.db, tmp_path / "shares", ["SOC lead", "Auditor", "Compliance officer"])
+    shares = {p.stem: p.read_text().strip() for p in (tmp_path / "shares").glob("*.share")}
+    assert set(shares) == {"soc-lead", "auditor", "compliance-officer"}
+    a = Agent(witness.url)
+    reg = requests.post(f"{witness.url}/register/agent", json={"platform_id": a.platform_id,
+                        "public_key": export_public_key(a.priv)}, timeout=5).json()
+    a.heartbeat(ts(1))
+    clock["seconds"] = 46
+    conn = connect(witness.db)
+    wq.presume(conn, now(), {"layer3": {"after_seconds": 45}})
+    conn.close()
+    _report(a, "quarantined", "q-77")
+    ap = lambda h, sh: requests.post(f"{witness.url}/quarantine/approve", json={"holder": h, "share": sh}, timeout=5).json()
+    poll = lambda: requests.get(f"{witness.url}/quarantine/poll", params={"platform_id": a.platform_id}, timeout=5).json()["command"]
+    assert ap(0, None)["status"] == "rejected"  # a button press alone is not enough any more
+    bad = shares["auditor"][:-1] + ("0" if shares["auditor"][-1] != "0" else "1")
+    ap(0, shares["soc-lead"])
+    ap(1, bad)
+    assert poll() is None  # wrong share: secret doesn't rebuild, approvals reset
+    assert requests.get(f"{witness.url}/status", timeout=5).json()["quarantine"]["holders"][0]["approved"] is False
+    ap(0, shares["soc-lead"])
+    ap(2, shares["compliance-officer"])
+    cmd = poll()
+    assert hashlib.sha256(bytes.fromhex(cmd["secret"])).hexdigest() == reg["unlock_hash"]
+    status = json.dumps(requests.get(f"{witness.url}/status", timeout=5).json())
+    assert not any(v.split("-")[1] in status for v in shares.values())  # no share value ever shown

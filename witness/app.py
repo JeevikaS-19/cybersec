@@ -11,7 +11,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from shared import export_public_key
-from witness import checks, events, quarantine, records
+from witness import checks, events, keyholders, quarantine, records
 from witness.store import connect, get_state, init_db, set_state
 
 DEFAULT_LAYERS = Path(__file__).resolve().parents[1] / "config" / "layers.yaml"
@@ -100,7 +100,8 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
                              (key_id, platform_id, public_key))
         if get_state(conn, "last_heartbeat") is None:
             set_state(conn, "last_heartbeat", {"ts": None, "recv": checks.now()})
-        return {"status": "registered", "platform_id": platform_id, "key_id": key_id, "witness_public_key": witness_public_key}
+        return {"status": "registered", "platform_id": platform_id, "key_id": key_id, "witness_public_key": witness_public_key,
+                "unlock_hash": keyholders.secret_hash(conn)}
 
     @app.post("/entries")
     def post_entry(entry: dict = Body(...), conn=Depends(get_conn)):
@@ -134,7 +135,7 @@ def create_app(db_path=None, layers_path=DEFAULT_LAYERS):
 
     @app.post("/quarantine/approve")
     def post_quarantine_approve(body: dict = Body(...), conn=Depends(get_conn)):
-        return quarantine.approve(conn, body.get("holder"), checks.now(), witness_key)
+        return quarantine.approve(conn, body.get("holder"), checks.now(), witness_key, body.get("share"))
 
     @app.get("/quarantine/poll")
     def get_quarantine_poll(platform_id: str, conn=Depends(get_conn)):

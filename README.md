@@ -60,7 +60,8 @@ python docker/ctl.py intruder      # attacker SSHes in with a stolen password, e
 python docker/ctl.py admin         # admin uses nano --<profile-id>                          -> allowed
 python docker/ctl.py tamper-record # edit a transaction in the bank database                  -> Layer 2
 python docker/ctl.py cut           # unplug the log server: quarantine after 45 s            -> Layer 3
-python docker/ctl.py restore       # plug back in, approve 2 of 3 on the page
+python docker/ctl.py restore       # plug back in, paste 2 of 3 shares on the page
+python docker/ctl.py shares        # demo: show the key holders' shares
 python docker/ctl.py reset         # fresh stack
 ```
 
@@ -110,5 +111,6 @@ python -m ruff check .
 - The witness learns each account's opening balance from the first record it sees, so setup must happen on a clean system.
 - A full-path command (`/usr/bin/nano`) bypasses the wrappers; the auditd backstop is next.
 - An attacker who steals the agent's key can keep sending heartbeats; record checks and Check C still catch changes to the bank's data.
-- Whoever controls the hypervisor or console can always get in. Approvals are buttons for the demo; production uses Shamir 2-of-3 shares.
+- Whoever controls the hypervisor or console can always get in.
+- Unlock shares pass through the witness to rebuild the secret; after an unlock, re-run `witness.keyholders init` to issue fresh shares.
 - On the demo laptop the quarantine lockout runs in dry-run mode (commands recorded); a Linux container runs them for real.

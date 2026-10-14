@@ -1,6 +1,7 @@
 cryptography==50.0.2
 fastapi==0.115.12
 psycopg[binary]==3.2.13
+pycryptodome==3.23.0
 pytest==9.1.1
 PyYAML==6.0.3
 requests==2.33.1

@@ -6,7 +6,8 @@
     python docker/ctl.py tamper-record   change a transaction amount directly in the bank database                (Layer 2)
     python docker/ctl.py tamper-balance  change a balance with no transaction                                     (Check C)
     python docker/ctl.py cut             unplug the log server from the network: quarantine after 45 s           (Layer 3)
-    python docker/ctl.py restore         plug it back in, then approve 2 of 3 on http://127.0.0.1:8000/
+    python docker/ctl.py restore         plug it back in, then paste 2 of 3 shares on http://127.0.0.1:8000/
+    python docker/ctl.py shares          show the key holders' shares (demo only)
     python docker/ctl.py status | logs | down | reset
 """
 import json
@@ -98,6 +99,10 @@ def main():
     elif cmd == "restore":
         run("network", "connect", "--alias", "log-server", NET, SERVER)
         print("network back: server reports in and stays locked until 2 of 3 approve on the auditor view")
+    elif cmd == "shares":
+        # Demo only: in production each holder receives their file once and it is deleted from the witness.
+        compose("exec", "-T", "witness", "sh", "-c",
+                'for f in /data/shares/*.share; do echo "$(basename $f .share): $(cat $f)"; done')
     elif cmd == "status":
         with urllib.request.urlopen("http://127.0.0.1:8000/status", timeout=5) as r:
             s = json.load(r)

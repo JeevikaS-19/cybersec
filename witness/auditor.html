@@ -72,7 +72,8 @@ pre.diff .add{color:var(--green)}pre.diff .del{color:var(--red)}
 .quar{font-size:28px;font-weight:800;color:var(--red);margin:0 0 18px}
 .ev{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media (max-width:760px){.ev{grid-template-columns:1fr}}
-.holders td{font-size:17px;padding:5px 10px}.feed li{line-height:1.6}
+.holders td{font-size:17px;padding:5px 10px}
+input.share{font:14px var(--mono);padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--text);width:190px}.feed li{line-height:1.6}
 .pill{font:700 13px var(--mono);padding:3px 10px;border-radius:999px}
 .pill.pending{background:var(--grey-bg);color:var(--muted)}.pill.approved{background:var(--green-bg);color:var(--green)}
 button.ap{font:600 15px var(--sans);padding:7px 16px;border-radius:8px;border:1px solid var(--green);background:transparent;color:var(--green);cursor:pointer}
@@ -205,13 +206,13 @@ function screen3() {
   }
   const lv = S.last_verified, approved = q.holders.filter((h) => h.approved).length;
   const holders = q.holders.map((h, i) =>
-    `<tr><td>${esc(h.name)}</td><td><span class="pill ${h.approved ? "approved" : "pending"}">${h.approved ? "Approved" : "Pending"}</span></td><td><button class="ap" data-holder="${i}" ${h.approved ? "disabled" : ""}>Approve</button></td></tr>`).join("");
+    `<tr><td>${esc(h.name)}</td><td><span class="pill ${h.approved ? "approved" : "pending"}">${h.approved ? "Approved" : "Pending"}</span></td><td>${q.shares_required && !h.approved ? `<input class="share" id="share${i}" type="password" autocomplete="off" placeholder="paste share" aria-label="${esc(h.name)} share"> ` : ""}<button class="ap" data-holder="${i}" ${h.approved ? "disabled" : ""}>Approve</button></td></tr>`).join("");
   const acts = last.filter((e) => e.detail && e.detail.quarantine_id === q.id && e.trigger === "quarantine:locked");
   const actions = acts.length ? [...(acts[0].detail.site_down || []), ...(acts[0].detail.lockout || [])] : [];
   const dry = acts.length && acts[0].detail.dry_run;
   const status = q.unlock_issued ? "Unlock signed by the witness. Waiting for the server to apply it…"
     : approved >= q.needed ? "Approvals complete. Unlock will be signed once the server reports in."
-    : `${q.needed} of ${q.holders.length} approvals needed to unlock.`;
+    : `${q.needed} of ${q.holders.length} approvals needed to unlock.${q.shares_required ? " Each holder pastes their own share (Shamir 2-of-3); the server unlocks only if they rebuild the secret." : ""}`;
   return `<p class="quar">Banking server has quarantined itself. All users logged out.</p>
   <p class="sub">${q.confirmed ? `Server confirmed quarantine <b>${esc(q.id)}</b>.` : "Reported by the witness: the server's policy locks it down after " + q.after + " s without contact."} No contact since ${clock(q.since)}. The witness did not do the lockdown; the network was cut.</p>
   <div class="ev">
@@ -226,6 +227,7 @@ function screen3() {
 
 function renderMain() {
   if (!S) return;
+  if (document.activeElement && document.activeElement.classList.contains("share")) return;  // keep a share being typed
   const html = view === 1 ? screen1() : view === 2 ? screen2() : view === 3 ? screen3() : screen0();
   if ($("main").dataset.html !== html) { $("main").innerHTML = html; $("main").dataset.html = html; }
 }
@@ -235,7 +237,12 @@ $("main").addEventListener("click", async (e) => {
   if (!b) return;
   b.disabled = true;
   if (mode !== "live") { approvals.add(Number(b.dataset.holder)); buildPreview(mode); renderAll(); return; }
-  try { await fetch("/quarantine/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ holder: Number(b.dataset.holder) }) }); } catch (err) { b.disabled = false; }
+  const inp = $("share" + b.dataset.holder);
+  try {
+    const r = await (await fetch("/quarantine/approve", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ holder: Number(b.dataset.holder), share: inp ? inp.value : null }) })).json();
+    if (r.status !== "ok") { b.disabled = false; if (inp) { inp.value = ""; inp.placeholder = r.reason || "rejected"; } }
+  } catch (err) { b.disabled = false; }
 });
 for (const n of [1, 2, 3]) $("c" + n).addEventListener("click", () => { view = view === n ? 0 : n; pinned = view !== 0; renderAll(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "0") { view = 0; pinned = false; renderAll(); } });

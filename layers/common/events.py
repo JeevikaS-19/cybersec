@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +21,9 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_SPOOL = "/var/spool/coc" if os.name == "posix" else str(REPO / "coc-spool")
 LAYERS_CONFIG = Path(os.environ.get("COC_LAYERS_CONFIG", REPO / "config" / "layers.yaml"))
+
+
+_last_ns = 0
 
 
 def spool_dir():
@@ -81,7 +85,9 @@ def emit(event):
         return None
     spool = spool_dir()
     spool.mkdir(parents=True, exist_ok=True)
-    final = spool / f"{event['event_id']}.json"
+    global _last_ns
+    _last_ns = max(time.time_ns(), _last_ns + 1)  # strictly increasing, so the spool keeps event order
+    final = spool / f"ev-{_last_ns:020d}-{event['event_id'][3:]}.json"
     tmp = spool / f".{event['event_id']}.tmp"
     tmp.write_text(json.dumps(event), encoding="utf-8")
     os.replace(tmp, final)
@@ -92,7 +98,7 @@ def pending(limit=50):
     spool = spool_dir()
     if not spool.is_dir():
         return []
-    return sorted(spool.glob("ev-*.json"), key=lambda p: p.stat().st_mtime)[:limit]
+    return sorted(spool.glob("ev-*.json"))[:limit]  # names start with a nanosecond stamp
 
 
 def main(argv=None):

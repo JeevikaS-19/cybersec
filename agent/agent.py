@@ -138,6 +138,8 @@ def register(conn, priv):
     )
     resp.raise_for_status()
     meta_set(conn, "key_id", resp.json()["key_id"])
+    if resp.json().get("unlock_hash"):
+        meta_set(conn, "unlock_hash", resp.json()["unlock_hash"])  # Layer 3: unlock needs the matching secret
     if resp.json().get("witness_public_key"):
         meta_set(conn, "witness_public_key", resp.json()["witness_public_key"])  # verifies Layer 3 unlocks
 
@@ -347,10 +349,20 @@ def quarantine_contact(conn, priv):
     if not cmd or cmd.get("action") != "unlock" or cmd.get("quarantine_id") != record["id"]:
         return
     witness_key = meta_get(conn, "witness_public_key")
-    signed = {k: cmd.get(k) for k in ("command_id", "action", "platform_id", "quarantine_id", "issued_at")}
+    signed = {k: cmd.get(k) for k in ("command_id", "action", "platform_id", "quarantine_id", "issued_at", "secret")}
     if not witness_key or not verify_signature(witness_key, signed, cmd.get("signature", "")):
         print("unlock command rejected: bad witness signature")
         return
+    expected = meta_get(conn, "unlock_hash")
+    if expected:
+        import hashlib
+        try:
+            ok = hashlib.sha256(bytes.fromhex(cmd.get("secret") or "")).hexdigest() == expected
+        except ValueError:
+            ok = False
+        if not ok:
+            print("unlock command rejected: key-holder secret does not match")
+            return
     l3.release(record)
     meta_set(conn, "quarantine", "")
     _report(priv, record, "released", 0)
