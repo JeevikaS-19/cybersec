@@ -5,8 +5,9 @@ cd /opt/coc
 mkdir -p /var/lib/bank /var/lib/coc /var/log/bank /etc/coc
 
 # Logins: the admin (team) and ops (an account whose password the attacker has stolen).
+getent group bank >/dev/null || groupadd bank
 for u in admin ops; do
-  id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash "$u"
+  id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash -G bank "$u"
 done
 echo "admin:${ADMIN_PASSWORD:?set ADMIN_PASSWORD}" | chpasswd
 echo "ops:${OPS_PASSWORD:?set OPS_PASSWORD}" | chpasswd
@@ -17,6 +18,9 @@ sed -i -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' -e 's/^#\
   "2026-10-14 09:12:03 txn-00012 acc-1 -> acc-3 2500.00 ok" \
   "2026-10-14 09:12:07 txn-00013 acc-2 -> acc-1 120.00 ok" \
   "2026-10-14 09:13:44 txn-00014 acc-3 -> acc-2 75.50 ok" > /var/log/bank/app.log
+
+# Bank staff (group bank) can write the bank's log and data, like on a real ops box.
+chgrp -R bank /var/log/bank /var/lib/bank && chmod -R g+w /var/log/bank /var/lib/bank && chmod g+s /var/log/bank /var/lib/bank
 
 # Layer 1: the team's profile-id (stored as a hash only), then the tripwire for every login shell.
 COC_PROFILE_ID="${COC_PROFILE_ID:?set COC_PROFILE_ID}" python -m layers.l1_tripwire.profiles add "${PLATFORM_ID:-bank-server}" >/dev/null
@@ -29,8 +33,9 @@ export COC_SPOOL=/var/spool/coc COC_LAYERS_CONFIG=$COC_LAYERS_CONFIG PYTHONPATH=
 ENV
 
 /usr/sbin/sshd
-python victim/bank.py >/var/log/bank/bank-stdout.log 2>&1 &
+(umask 002; exec python victim/bank.py >/var/log/bank/bank-stdout.log 2>&1) &
 for _ in $(seq 1 50); do [ -s "$BANK_DB_PATH" ] && break; sleep 0.2; done
+chmod g+w "$BANK_DB_PATH"  # bank staff can write the data (sqlite creates it 0644)
 # Layer 1 backstop: root watcher for writes that bypass the wrappers.
 python -m layers.l1_tripwire.backstop init
 python -u -m layers.l1_tripwire.backstop run >/var/log/coc-backstop.log 2>&1 &

@@ -50,3 +50,9 @@
 - Deposits/withdrawals: missing side = `"external"`. Platforms without stored balances: Check C seeds each account from its first state challenge.
 - State challenges read balance + unseen rows from one database snapshot (REPEATABLE READ), so a commit mid-question can't cause a false alarm.
 - Verified: busy PostgreSQL 16 bank (4 concurrent writers, 27 rollbacks) -> 152/152 rows verified, zero false alarms; row edit and balance edit caught within 5 s.
+
+## Layer 1 backstop (P3)
+- auditd is not available inside Docker Desktop containers (audit is host-only), so the backstop is the planned fallback: inotify on the protected folders + /proc attribution (user, login uid, program, source IP), root-owned.
+- Authorized edits leave a marker encrypted to the backstop's X25519 key (proves the profile-id, never stores it in plain text, can't be forged without it). The wrapper then exec()s the real command, so the profile-id is no longer visible in `ps`.
+- Platform writers are excused only for files they hold open (+ sqlite side files); a non-allowed process touching the same file always wins.
+- Limits: a writer that exits within milliseconds can't be named (the change is still reported); an edit by the platform's own process itself is not attributable here (Layer 2 record checks/Check C still catch it).

@@ -59,8 +59,11 @@ The test code is written during the event (Claude Code writes and runs them). Th
 | ID | Simulate | Expected |
 |---|---|---|
 | T5a | Run each wrapper (`nano`, `vim`, `rm`, `mv`, `cp`, `sed`, `truncate`, `shred`, `cat` on a log, `cd` into the log dir) | Event fired, real log untouched. Block mode: command refused. Deception mode: command "succeeds" on a decoy (A1) |
-| T5b | Run `/usr/bin/nano` / `\nano` / `python -c` to write a log | auditd (or inotify fallback) catches it (A2) |
-| T5c | Temp file + rename over a log | Directory watch catches it (A3) |
+
+
+| T5b | Full path (`/usr/bin/vim.tiny`) or `python` writing a protected file/the bank DB | Backstop alert `backstop:write`, attributed (user, login uid, program); verified in the log-server container |
+| T5c | Temp file + rename over the log | Wrapper (`cp`) and backstop both report it |
+| T5g | Admin `vim --<profile-id>` and the bank's own writes | No backstop alert (encrypted authorization marker; allowed writer) |
 | T5d | Guarded command with a wrong profile-id, then the right one (`vim --<profile-id> app.log`) | Wrong: trips like an intruder. Right: real command runs, logged as `authorized:<cmd>` with the profile, no alert; the profile-id is never stored or sent |
 | T5e | Change the guarded command list in `config/layers.yaml`, re-run `install.sh` | Wrappers match the config; ordinary commands outside protected paths run normally, no event |
 | T5f | Deception: edit a log with `vim` and save | Real log unchanged; second event carries the attempted diff (old -> new) |

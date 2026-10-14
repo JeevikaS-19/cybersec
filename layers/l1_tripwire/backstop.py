@@ -140,14 +140,12 @@ def suspects(path):
             cwd = os.readlink(d / "cwd")
         except OSError:
             cwd = ""
-        hit = path in cmd or cwd == folder
-        if not hit:
-            try:
-                hit = any(os.readlink(fd) in (path, folder) for fd in (d / "fd").iterdir())
-            except OSError:
-                pass
-        if hit and cmd:
-            out.append(_who(d, cmd))
+        try:
+            files = [t for t in (os.readlink(fd) for fd in (d / "fd").iterdir()) if t == folder or t.startswith(folder + "/")]
+        except OSError:
+            files = []
+        if (path in cmd or cwd == folder or files) and cmd:
+            out.append(dict(_who(d, cmd), files=files))
     return out
 
 
@@ -194,26 +192,44 @@ def init_keys():
     os.chmod(ALLOW_DIR, 0o1733)  # anyone can drop a marker, nobody can list or read others'
 
 
+TEMP_SUFFIXES = (".swp", ".swx", ".swo", "~")
+
+
 def handle(path, ev, markers, cfg, recent):
+    name = Path(path).name
+    if name.endswith(TEMP_SUFFIXES) or name == "4913":
+        return None  # editor scratch files; the real file's change (or rename onto it) is reported
     markers.refresh()
     found = suspects(path)
-    writers = [s for s in found if not any(a in s["cmd"] for a in cfg["allowed_writers"])]
-    if found and not writers:
-        return None  # the platform's own logger / app
+    def excused(s):  # the platform's own writer, on a file it holds open (or that file's -journal/-wal)
+        return any(a in s["cmd"] for a in cfg["allowed_writers"]) and any(
+            path == f or path.startswith(f + "-") for f in s["files"])
+    allowed = [s for s in found if any(a in s["cmd"] for a in cfg["allowed_writers"])]
+    writers = [s for s in found if s not in allowed]
+    if not writers and any(excused(s) for s in found):
+        return None  # only the platform's own writer is touching it
     auth = markers.covers(path, {s["uid"] for s in writers})
     who = writers[0] if writers else None
-    key = (path, who["pid"] if who else None)
-    if auth or time.time() - recent.get(key, 0) < DEBOUNCE:
+    folder = str(Path(path).parent)
+    key = (folder, who["pid"] if who else None)  # one alert per burst, not per file
+    now = time.time()
+    if auth or now - recent.get(key, 0) < DEBOUNCE:
         return None
-    recent[key] = time.time()
+    if not who and now - recent.get((folder, "attributed"), 0) < 2 * DEBOUNCE:
+        return None  # trailing writes (e.g. sqlite closing) of an edit we already attributed
+    recent[key] = now
+    if who:
+        recent[(folder, "attributed")] = now
     detail = {"cmd": who["cmd"] if who else f"(process already gone) {ev} {path}", "target": path, "event": ev,
               "mode": "backstop", "result": "changed the real file",
               "rule": f"{path} changed outside the tripwire (full path, another tool or temp-file rename)",
-              "suspects": writers[:5]}
+              "suspects": [{k: v for k, v in s.items() if k != "files"} for s in writers[:5]]}
     e = events.make_event(1, "backstop:write", detail, process=who["cmd"].split()[0] if who else None,
                           exe=who["exe"] if who else None)
     if who:
         e["who"].update({k: who[k] for k in ("uid", "user", "auid", "src_ip")})
+    else:
+        e["who"].update(uid=None, user="(writer already gone)", auid=None, src_ip=None)
     events.emit(e)
     return e
 
