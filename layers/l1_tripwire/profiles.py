@@ -26,10 +26,14 @@ def _scrypt(value, salt):
 
 def _load():
     path = profiles_file()
-    if not path.exists():
-        return []
+    try:
+        if not path.exists():
+            return []
+        text = path.read_text()
+    except PermissionError:
+        return []  # can't read the hashes: no profile matches, the command trips
     rows = []
-    for line in path.read_text().splitlines():
+    for line in text.splitlines():
         try:
             name, _, salt, digest = line.strip().split("$")
             rows.append((name, base64.b64decode(salt), base64.b64decode(digest)))

@@ -49,6 +49,23 @@ It starts a fresh witness, fake bank and agent, opens the auditor view at **http
 | 6 | Plug it back in | Server reports the records sealed during the cut; press **Approve** twice to unlock |
 | r | Reset everything | |
 
+## Run it as real servers (Docker)
+
+Three containers on one laptop: **witness** (API only, no SSH, unprivileged user), **log-server** (bank, agent, Layer 1 tripwire for every SSH login, Layer 3 with the real lockout) and **attacker** (an SSH client).
+
+```bash
+python docker/fetch_wheels.py      # once, on good internet: builds then work offline
+python docker/ctl.py up            # auditor view: http://127.0.0.1:8000/
+python docker/ctl.py intruder      # attacker SSHes in with a stolen password, edits the log  -> Layer 1
+python docker/ctl.py admin         # admin uses nano --<profile-id>                          -> allowed
+python docker/ctl.py tamper-record # edit a transaction in the bank database                  -> Layer 2
+python docker/ctl.py cut           # unplug the log server: quarantine after 45 s            -> Layer 3
+python docker/ctl.py restore       # plug back in, approve 2 of 3 on the page
+python docker/ctl.py reset         # fresh stack
+```
+
+Demo passwords and the profile-id come from `docker/.env` (created from `.env.example`, gitignored). Quarantine evidence is append-only: even `docker volume rm` is refused until the flag is cleared, which `ctl.py reset` does explicitly.
+
 ## Attach to another platform
 
 The agent is a sidecar; the platform's code doesn't change. Everything is set in `config/layers.yaml` and env vars:

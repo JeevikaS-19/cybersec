@@ -1,0 +1,39 @@
+# Chain of Custody: one command up.   cd docker && cp .env.example .env && docker compose up -d --build
+# Auditor view: http://127.0.0.1:8000/
+name: chain-of-custody
+services:
+  witness:
+    build: { context: .., dockerfile: docker/witness.Dockerfile }
+    init: true
+    ports: ["127.0.0.1:8000:8000"]           # API + auditor view only; no SSH server in this image
+    environment:
+      CHALLENGE_CHANCE: ${CHALLENGE_CHANCE:-0.5}
+      SWEEP_SECONDS: ${SWEEP_SECONDS:-10}
+    volumes: [witness-data:/data]
+    networks: [custody]
+    restart: unless-stopped
+
+  log-server:
+    build: { context: .., dockerfile: docker/log-server.Dockerfile }
+    hostname: bank-server
+    init: true                                 # reap ended sessions (the agent is the main process)
+    environment:
+      WITNESS_URL: http://witness:8000
+      PLATFORM_ID: bank-server
+      COC_PROFILE_ID: ${COC_PROFILE_ID:?set COC_PROFILE_ID in docker/.env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in docker/.env}
+      OPS_PASSWORD: ${OPS_PASSWORD:?set OPS_PASSWORD in docker/.env}
+    cap_add: [LINUX_IMMUTABLE, AUDIT_CONTROL, AUDIT_WRITE]   # append-only evidence; auditd backstop
+    volumes: [coc-evidence:/var/lib/coc]
+    networks: [custody]
+    depends_on: [witness]
+
+  attacker:
+    build: { context: .., dockerfile: docker/attacker.Dockerfile }
+    networks: [custody]
+
+networks:
+  custody: {}
+volumes:
+  witness-data: {}
+  coc-evidence: {}
