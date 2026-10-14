@@ -22,7 +22,7 @@ Copy this into `AGENTS.md` (Antigravity) and `CLAUDE.md` (Claude Code).
 
 ## Naming (use exactly)
 - **Layer 2** heartbeat + checksum (built first): contains **Check A** sealed chain, **Check B** outside witness, **Check C** truth check, and the tamper classifier (`tamper_type` on every alert).
-- **Layer 1** command tripwire (built second). **Layer 3** break glass (built last).
+- **Layer 1** command tripwire (built second). **Layer 3** quarantine (built last).
 - Use these names exactly in code, UI and slides. Checks A to C are parts of Layer 2, never separate layers.
 
 ## Rules for Antigravity (builder)
@@ -35,8 +35,8 @@ Copy this into `AGENTS.md` (Antigravity) and `CLAUDE.md` (Claude Code).
 - Canonical encoding, hashing and signing live in `shared/` only, imported everywhere else.
 - New layer code goes in new modules under `layers/`. Changing a base module (`shared/`, `agent/`, `witness/`) for a layer: add the smallest hook and say what you changed.
 - Every check and layer can be switched on and off in `config/layers.yaml`.
-- Layer 3 order is fixed: capture → push → isolate → freeze → lock out → report. **Never reboot.**
-- Secrets: private keys, Shamir shares, the revert key and vault credentials are never printed, logged or committed. Store only hashes of the revert key and break-glass secret.
+- Layer 3 (quarantine) order is fixed: capture → seal locally → site down → lock out (root included) → report. **Never reboot.**
+- Secrets: private keys, Shamir shares, profile-ids and vault credentials are never printed, logged or committed. Store only hashes of profile-ids.
 - No new libraries without asking. Allowed: FastAPI, uvicorn, requests, cryptography, sqlite3, streamlit, pycryptodome (Shamir only), minio (Python client), pyyaml, pytest, ruff (dev-only). System tools in containers: auditd, iptables, chattr, inotify-tools.
 - No cloud services. Everything runs in Docker on one laptop.
 - If unsure, ask one question. Don't guess.
@@ -47,7 +47,7 @@ Copy this into `AGENTS.md` (Antigravity) and `CLAUDE.md` (Claude Code).
 - Always check, every review:
   - matches the step in `02-flow.md`, the routes and signed fields in `06-api-contract.md`
   - no floats in amounts; two balance fields
-  - crypto and secrets: keys, shares, revert key never printed, sent or stored in plain form
+  - crypto and secrets: keys, shares, profile-ids never printed, sent or stored in plain form
   - witness never trusts the agent's balances or challenge replies on their own
   - canonical encoding imported from `shared/`, not reimplemented
   - Layer 3 step order, no reboot path

@@ -4,154 +4,94 @@
 
 Hackurity 2026 · PS-6 · Team Firewall Crew
 
-An insider with admin access on a bank server can edit a balance and then edit the logs to hide it. The logs sit on the same machine as the attacker, so most tools never notice. Chain of Custody moves the proof **off the machine**: every log entry is signed, chained and checked by an outside **witness** the attacker can't reach. Tampering is **detected and provable**, and every alert says **what kind** of tampering happened.
-
----
-
-## How it works
+An insider with admin access on a bank server can edit a balance and then edit the logs to hide it. The logs sit on the same machine as the attacker, so most tools never notice. Chain of Custody moves the proof **off the machine**: every record is signed, chained and checked by an outside **witness** the attacker can't reach. Tampering is **detected and provable**, and every alert says **what kind** of tampering happened. The bank's own screens show nothing; alerts appear only on the witness's auditor view.
 
 ```mermaid
 flowchart LR
     subgraph LS["Log server (attacker may have root)"]
-        BANK["Bank app<br/>bank.db"] --> AGENT["Agent<br/>signs + chains entries"]
+        BANK["Bank<br/>bank.db"] --> AGENT["Agent<br/>seals + signs records"]
+        L1["Layer 1<br/>command tripwire"] --> AGENT
+        L3["Layer 3<br/>quarantine"] --- AGENT
     end
-    AGENT -- "signed entries<br/>heartbeat every 5 s<br/>challenge answers" --> WIT["Witness<br/>(separate server, public key only)"]
-    WIT -- "hash + state challenges" --> AGENT
-    WIT --> SOC["SOC view<br/>/status · /alerts"]
+    AGENT -- "signed records, heartbeat every 5 s,<br/>answers to random checks" --> WIT["Witness<br/>(separate server, public key only)"]
+    WIT -- "asks for record #N, sweeps, balances" --> AGENT
+    WIT --> UI["Auditor view<br/>http://witness:8000/"]
 ```
 
-### Three layers
+## Three layers
 
-| Layer | What it does | Status |
-|---|---|---|
-| **Layer 2 · Heartbeat + checksum** | Detects tampering and names what kind | ✅ Built |
-| **Layer 1 · Command tripwire** | Catches the intruder in the act: `nano app.log` opens a decoy, the real log is untouched, and what they tried to change is captured | ✅ Built · auditd backstop next |
-| **Layer 3 · Break glass** | Last resort: capture evidence, isolate, freeze, unlock only with 2-of-3 key holders. Never reboots. | 🛠 Planned |
-
-### Layer 2 checks
-
-| Check | Question it answers | How |
-|---|---|---|
-| **A · Sealed chain** | Was anything changed? | Every entry is SHA-256 hashed, linked to the previous one and signed with Ed25519. The witness re-hashes everything it holds every 5 s. |
-| **B · Outside witness** | Is the agent alive and honest? | Signed heartbeat every 5 s (silence after 15 s), random hash challenges, timestamps that only move forward. |
-| **C · Truth check** | Does the log match the bank's real state? | The witness replays every balance itself and asks the agent for a real balance at random times. This catches a **direct database edit with no log entry**, which a hash chain alone never sees. |
-
-### What the SOC sees: tamper types
-
-| `tamper_type` | Meaning |
+| Layer | What it does |
 |---|---|
-| `entry_edited` | A stored entry no longer matches its hash |
-| `entry_deleted` | A `seq` gap: an entry is missing |
-| `entries_reordered` | Entries out of order, links swapped |
-| `entry_replayed` | The same entry or heartbeat sent twice |
-| `entry_inserted` | An extra entry that doesn't fit the chain |
-| `backdated` | A timestamp earlier than the last accepted one |
-| `forged` | Bad signature or unknown key |
-| `agent_silenced` | No heartbeat, or a challenge went unanswered |
-| `balance_misreported` | A reported balance differs from the witness's replay |
-| `db_edited_without_log` | The bank's real balance differs, while the chain stays green |
+| **Layer 2 · Heartbeat + checksum** | Every bank transaction becomes a sealed record (SHA-256 chain + Ed25519 signature) held by the witness. The witness asks for random records (`#42`) and sweeps all of them, comparing the bank's row **now** with the sealed copy, field by field. **Check A** sealed chain, **Check B** heartbeat + challenges, **Check C** the witness replays every balance and asks for real ones. Every alert names its `tamper_type`. |
+| **Layer 1 · Command tripwire** | The team runs guarded commands with its platform's secret profile-id: `nano --<profile-id> app.log` (allowed, logged). An intruder types plain `nano`: in **deception mode** they edit a decoy, the real log is never touched, and the change they tried to make is captured. Guarded commands and paths come from config. |
+| **Layer 3 · Quarantine** | If the server loses the witness for 45 s (the attacker cut the network), it quarantines itself: capture evidence → seal locally → site down → lock out every user including root → QUARANTINED. Never reboots. It keeps sealing records, reports in when the network is back and stays locked until **2 of 3 key holders** approve; the witness then signs the unlock. |
 
----
+## Run the demo (one command)
 
-## Quick start (one laptop, no Docker)
-
-Needs Python 3.11 or newer.
+Needs Python 3.11+. Layer 1 runs in WSL Ubuntu (or any Linux).
 
 ```bash
-git clone https://github.com/JeevikaS-19/cybersec.git
-cd cybersec
-python -m venv .venv
-.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+git clone https://github.com/JeevikaS-19/cybersec.git && cd cybersec
+python -m venv .venv && .venv\Scripts\activate      # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
+python demo/demo.py
 ```
 
-Open three terminals (activate the venv in each):
+It starts a fresh witness, fake bank and agent, opens the auditor view at **http://127.0.0.1:8000/**, and gives you a menu:
 
-```bash
-# 1 · Witness
-python -m uvicorn --factory witness.app:create_app --port 8000
-
-# 2 · Fake bank: one transfer per second into bank.db
-python victim/bank.py
-
-# 3 · Agent: reads bank.db, signs, sends to the witness
-python agent/agent.py
-```
-
-Check it's healthy:
-
-```bash
-curl http://127.0.0.1:8000/status     # {"checks": {"A": "green", "B": "green", "C": "green"}, "state": "normal", ...}
-curl http://127.0.0.1:8000/alerts
-```
-
-### Try an attack
-
-| Attack | Do this | You'll see |
+| Key | Attack | What the auditor view shows |
 |---|---|---|
-| Kill the agent | Stop terminal 3 | Check B red, `agent_silenced` within ~15 s |
-| Edit a balance with no log | `sqlite3 bank.db "UPDATE accounts SET balance_paise = balance_paise + 1000000 WHERE account_id='acc-1'"` | Check C red, A and B stay green |
+| 1 | Intruder edits the log with `vim` (no profile-id) | Layer 1 caught: command log, rule broken, the attempted diff; real log untouched |
+| 2 | Admin edits with `vim --<profile-id>` | Allowed row in the command log, no alert |
+| 3 | Attacker edits a transaction row in `bank.db` | Layer 2 caught: **Record #N**, expected vs found, changed field in red |
+| 4 | Attacker changes a balance with no transaction | Check C: `db_edited_without_log` |
+| 5 | Cut the network | Flat heartbeat, then Layer 3: "Banking server has quarantined itself" |
+| 6 | Plug it back in | Server reports the records sealed during the cut; press **Approve** twice to unlock |
+| r | Reset everything | |
 
-For a faster demo, set the env var `CHALLENGE_CHANCE=1.0` before starting the witness so it challenges every poll.
+## Attach to another platform
 
-### Run the witness on a separate machine
+The agent is a sidecar; the platform's code doesn't change. Everything is set in `config/layers.yaml` and env vars:
 
-The witness is meant to live outside the log server. On the second machine run the witness with `--host 0.0.0.0` and allow port 8000 through the firewall. On the log server, before starting the agent:
+| Setting | Where |
+|---|---|
+| Witness address | `WITNESS_URL` |
+| Bank database | `BANK_DB_PATH` (PostgreSQL adapter: next) |
+| Platform name | `PLATFORM_ID` |
+| Team profile-id | `python -m layers.l1_tripwire.profiles add <platform>` (stored as a hash) |
+| Guarded commands, protected paths, deception/block | `layer1` |
+| Heartbeat, silence alarm, check rates, sweep | `layer2` |
+| Quarantine time, lockout/site-down commands, key holders | `layer3` (`dry_run: false` on a real server) |
+| Install the tripwire | `sudo sh layers/l1_tripwire/install.sh` |
 
-```bash
-set WITNESS_URL=http://<witness-ip>:8000       # PowerShell: $env:WITNESS_URL="http://<witness-ip>:8000"
-```
+Run the pieces yourself: `python -m uvicorn --factory witness.app:create_app --port 8000` (witness), `python agent/agent.py` (agent, on the log server).
 
----
-
-## Plugging in another platform
-
-The agent is a small sidecar process. A platform plugs in by giving it its transactions and balances; nothing in the platform itself changes.
-
-1. **Point the agent at your data.** Set `BANK_DB_PATH`, and map your transaction rows to the entry fields in `agent/agent.py` (`sync_bank`). The agent needs, per transaction: `txn_id`, `timestamp`, `from_account`, `to_account`, `amount_paise` and the balances after the transaction, `from_balance_paise` and `to_balance_paise`. Amounts are **integer paise**, never floats.
-2. **Answer balance questions.** For Check C the agent must read an account's real balance from your system (`bank_balance_at`).
-3. **Give it an identity.** Set `PLATFORM_ID` (default `log-server-1`). The agent creates its own Ed25519 key, registers its public key with the witness (`POST /register/agent`) and keeps the private key locally. The private key is never sent or printed.
-4. **Point it at the witness.** Set `WITNESS_URL`.
-
-Each platform gets its own independent chain, so one witness can serve many platforms.
-
-| Env var | Used by | Default |
-|---|---|---|
-| `WITNESS_URL` | agent | `http://127.0.0.1:8000` |
-| `BANK_DB_PATH` | bank, agent | `bank.db` |
-| `AGENT_DB_PATH` | agent (local copy of every entry) | `agent_state.db` |
-| `PLATFORM_ID` | agent | `log-server-1` |
-| `WITNESS_DB_PATH` | witness | `witness.db` |
-
-Every check and layer can be switched on or off in `config/layers.yaml`.
-
-### Witness API
+## Witness API
 
 | Route | Purpose |
 |---|---|
-| `POST /register/agent` | Register a platform's public key, returns `key_id` |
-| `POST /entries` | Submit a signed, chained entry |
-| `POST /heartbeat` | Signed heartbeat every 5 s |
-| `GET /challenge/poll` · `POST /challenge/response` | Hash and state challenges |
-| `GET /status` | Checks A to C, layers, state (normal / alert / frozen) |
-| `GET /alerts` | Every alert with its `tamper_type` |
-| `GET /verify?from_seq=&to_seq=` | Re-verify a range of the chain |
+| `POST /register/agent` | Register a platform's public key; returns `key_id` and the witness's public key |
+| `POST /entries` · `POST /heartbeat` | Signed records and heartbeats |
+| `GET /challenge/poll` · `POST /challenge/response` | Random checks: latest hash, balance, record #N, sweep |
+| `POST /events` · `GET /timeline` | Layer 1/3 events, signed by the agent |
+| `POST /quarantine/report` · `/quarantine/approve` · `GET /quarantine/poll` | Layer 3 |
+| `GET /status` · `/alerts` · `/mismatches` · `/activity` | Auditor view data; `GET /` is the auditor view |
 
----
+Full contract: `MD_FILES/06-api-contract.md`.
 
 ## Tests
 
 ```bash
-python -m pytest -q -m "not slow and not docker"   # fast suite
+python -m pytest -q -m "not slow and not docker"   # 46 fast tests
+python -m pytest -q -m slow                        # T0: 10,000 transactions, zero alerts
+bash layers/l1_tripwire/smoke.sh                   # Layer 1 in Linux/WSL
 python -m ruff check .
 ```
 
 ## Honest limits
 
-- The witness learns each account's opening balance from the first entry it sees, so setup must happen on a clean system.
-- An attacker who steals the agent's private key can keep signing heartbeats; Check C still catches balance changes.
-- If the network is cut, the witness sees the silence. The agent queues entries and resends them with the same `seq` when the network is back.
-
-## Roadmap
-
-Docker compose with a no-SSH witness container, write-once evidence vault (MinIO object lock), Layer 1 tripwire with auditd, Layer 3 break glass with Shamir 2-of-3 unlock, SOC and auditor dashboard.
+- The witness learns each account's opening balance from the first record it sees, so setup must happen on a clean system.
+- A full-path command (`/usr/bin/nano`) bypasses the wrappers; the auditd backstop is next.
+- An attacker who steals the agent's key can keep sending heartbeats; record checks and Check C still catch changes to the bank's data.
+- Whoever controls the hypervisor or console can always get in. Approvals are buttons for the demo; production uses Shamir 2-of-3 shares.
+- On the demo laptop the quarantine lockout runs in dry-run mode (commands recorded); a Linux container runs them for real.

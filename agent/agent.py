@@ -14,6 +14,7 @@ import requests
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from layers.common import events as layer_events
+from layers.common.config import get as cfg
 from layers.l3_quarantine import quarantine as l3
 from shared import (
     GENESIS_PREV_HASH,
@@ -28,8 +29,8 @@ WITNESS_URL = os.environ.get("WITNESS_URL", "http://127.0.0.1:8000")
 BANK_DB_PATH = os.environ.get("BANK_DB_PATH", "bank.db")
 AGENT_DB_PATH = os.environ.get("AGENT_DB_PATH", "agent_state.db")
 PLATFORM_ID = os.environ.get("PLATFORM_ID", "log-server-1")
-HEARTBEAT_SECONDS = 5
-CHALLENGE_SECONDS = 2
+HEARTBEAT_SECONDS = cfg("layer2", "heartbeat_seconds", 5.0, "HEARTBEAT_SECONDS")
+CHALLENGE_SECONDS = cfg("layer2", "challenge_poll_seconds", 2.0, "CHALLENGE_POLL")
 TIMEOUT = 5
 # Cap work per loop pass so heartbeats keep their 5 s rhythm.
 SEND_BATCH = 50

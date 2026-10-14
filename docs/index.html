@@ -146,7 +146,7 @@ footer{padding:36px 0 56px;color:var(--muted);font-size:.9rem;border-top:1px sol
   <div class="grid">
     <div class="card"><span class="tag ok">Built</span><h3>Layer 2 · Heartbeat + checksum</h3><p>Detects tampering and names what kind. Checks A to C below.</p></div>
     <div class="card"><span class="tag ok">Built</span><h3>Layer 1 · Command tripwire</h3><p>Catches the intruder in the act: <code>nano app.log</code> quietly opens a decoy. The real log is never touched, and the edit they tried is captured as evidence.</p></div>
-    <div class="card"><span class="tag next">Planned</span><h3>Layer 3 · Break glass</h3><p>Last resort: capture evidence, isolate, freeze. Unlock needs 2 of 3 key holders. Never reboots.</p></div>
+    <div class="card"><span class="tag ok">Built</span><h3>Layer 3 · Quarantine</h3><p>If the network is cut for 45 s, the server locks itself down: evidence sealed, site down, everyone including root logged out. Unlock needs 2 of 3 key holders. Never reboots.</p></div>
   </div>
 
   <h3>Layer 2 checks</h3>
@@ -274,7 +274,7 @@ python agent/agent.py</pre></div></div>
     <li>If the network is cut, the witness sees the silence; the agent queues entries and resends them with the same <code>seq</code>.</li>
   </ul>
   <h3>Roadmap</h3>
-  <p>Docker compose with a no-SSH witness container · write-once evidence vault (MinIO object lock) · Layer 1 tripwire with auditd · Layer 3 break glass with Shamir 2-of-3 unlock · SOC and auditor dashboard.</p>
+  <p>auditd backstop for full-path commands · PostgreSQL adapter for the team's bank · Shamir 2-of-3 shares for unlock · Docker compose with a no-SSH witness container · write-once evidence vault.</p>
 </div></section>
 
 <footer><div class="wrap">Chain of Custody · Team Firewall Crew · Hackurity 2026. Tampering is detected and provable.</div></footer>

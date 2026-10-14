@@ -1,11 +1,11 @@
 """Witness logic for Check A (sealed chain) and Check B (outside witness). No HTTP here."""
 
-import os
 import random
 import secrets
 import time
 from datetime import datetime
 
+from layers.common.config import get as cfg
 from shared import GENESIS_PREV_HASH, hash_entry, verify_signature
 from witness import quarantine, records
 from witness.classify import for_rejection
@@ -15,11 +15,11 @@ ENTRY_FIELDS = (
     "seq", "timestamp", "event_type", "txn_id", "from_account", "to_account",
     "amount_paise", "from_balance_paise", "to_balance_paise", "prev_hash", "key_id", "hash",
 )
-SILENCE_SECONDS = 15
-CHALLENGE_SECONDS = 5
-CHALLENGE_CHANCE = float(os.environ.get("CHALLENGE_CHANCE", "0.2"))
-STATE_SHARE = float(os.environ.get("STATE_SHARE", "0.3"))
-RECORD_SHARE = float(os.environ.get("RECORD_SHARE", "0.4"))
+SILENCE_SECONDS = cfg("layer2", "silence_seconds", 15.0, "SILENCE_SECONDS")
+CHALLENGE_SECONDS = cfg("layer2", "challenge_deadline_seconds", 5.0, "CHALLENGE_DEADLINE")
+CHALLENGE_CHANCE = cfg("layer2", "challenge_chance", 0.2, "CHALLENGE_CHANCE")
+STATE_SHARE = cfg("layer2", "state_share", 0.3, "STATE_SHARE")
+RECORD_SHARE = cfg("layer2", "record_share", 0.4, "RECORD_SHARE")
 A_KINDS = {
     "sequence_gap", "chain_break", "bad_signature", "unknown_key_id", "entry_edited",
     "entry_deleted", "entries_reordered", "entry_replayed", "late_entry", "challenge_mismatch",
@@ -88,6 +88,10 @@ def _replay_balances(conn, entry, now_ts):
 
 def submit_entry(conn, entry, now_ts, check_c=True):
     last = _last_accepted(conn)
+    if last and entry.get("seq") == last["seq"] and entry.get("hash") == last["hash"]:
+        # Byte-identical resend of the latest accepted entry: its reply was lost (e.g. network cut mid-send).
+        # Harmless, so accept it once more without storing it. Replaying any older entry still alerts.
+        return {"status": "accepted"}
     reason = _reject_reason(conn, entry, last)
     accepted = reason is None
     columns = ", ".join(ENTRY_FIELDS + ("signature", "accepted"))

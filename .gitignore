@@ -21,3 +21,4 @@ __pycache__/
 # local tool settings
 .claude/settings.local.json
 coc-spool/
+demo/.run/

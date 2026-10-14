@@ -87,7 +87,8 @@ def test_t1f_replayed_entry_is_sequence_error(witness):
     a = Agent(witness.url)
     first = a.next_entry()
     a.send(first)
-    assert a.send(first) == {"status": "rejected", "reason": "sequence_gap"}
+    a.send(a.next_entry())
+    assert a.send(first) == {"status": "rejected", "reason": "sequence_gap"}  # an older entry sent again
     assert _alerts(witness.db) == [("sequence_gap", "1", "entry_replayed")]
 
 
@@ -193,3 +194,12 @@ def test_honest_sweep_matches_and_stays_green(witness, monkeypatch):
     assert _reply(a, {"challenge_id": sweep["id"], "type": "sweep", "records": recs}) == {"status": "ok"}
     assert requests.get(f"{witness.url}/mismatches", timeout=5).json()["mismatches"] == []
     assert requests.get(f"{witness.url}/status", timeout=5).json()["checks"]["A"] == "green"
+
+
+def test_identical_resend_after_lost_reply_is_accepted_once(witness):
+    a = Agent(witness.url)
+    first = a.next_entry()
+    a.send(first)
+    assert a.send(first) == {"status": "accepted"}  # same seq, same hash, same signature
+    a.send(a.next_entry())
+    assert _alerts(witness.db) == []

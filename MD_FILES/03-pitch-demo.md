@@ -28,14 +28,16 @@ Focus: **innovation, scalability, product ready, amazing pitch.**
 ---
 
 ## Round 2 · 7:30 to 8:30 PM · It works
-**Demo (4 min)**
-1. All green. Quick Layer 2 recap: edit an entry → `entry_edited`.
-2. **Layer 1:** `nano app.log` → tripwire, command blocked.
-3. Bypass with `/usr/bin/nano`, edit a record → **auditd backstop feeds Layer 2**: auditor view shows before / after / diff / **who**.
-4. Try to delete that evidence from the vault → **denied** by object lock, even with the vault admin credential.
-5. DB edit (A6) → Check C, `db_edited_without_log`.
+Run `python demo/demo.py`; the auditor view opens at http://127.0.0.1:8000/. The bank's own side never shows an alert; only the witness does.
 
-**Fallback (if auditd failed in Phase 0):** step 3 uses the inotify fallback; say so. Decide by 6:30, rehearse it, never improvise live.
+**Demo (about 5 min), menu keys in brackets**
+1. **Normal:** all three cards green, heartbeat monitor ticking, up spikes labelled `#N` (the witness asking for a record), green down spikes (it matched). "Every record is sealed and checked from outside the machine."
+2. **Layer 1 [2] then [1]:** the admin edits with `vim --<profile-id>` → allowed row. The intruder types plain `vim` → red row, rule broken, and the change they *tried* to make. "They think it worked. The real log never changed."
+3. **Layer 2 [3]:** the attacker edits a transaction row straight in the database → within ~15 s **Record #N**: expected vs found, the changed amount in red, hashes underneath.
+4. **Check C [4]:** a balance changed with no transaction → `db_edited_without_log`.
+5. **Layer 3 [5]:** cut the network → monitor goes flat → after 45 s "Banking server has quarantined itself. All users logged out." **[6]** plug it back → the server reports the records it sealed during the cut and stays locked → press Approve twice → Connected.
+
+**If something fails:** reset with **[r]** and continue from the next step; backup recording for Layer 3 (it takes ~60 s).
 
 ---
 

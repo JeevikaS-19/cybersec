@@ -9,6 +9,17 @@ checks:
   C: true
   classifier: true
 
+layer2:
+  heartbeat_seconds: 5          # agent sends a signed heartbeat this often
+  silence_seconds: 15           # witness alarm after this long without one
+  challenge_poll_seconds: 2     # agent asks the witness for a random check this often
+  challenge_deadline_seconds: 5 # answer within this, or missed_challenge
+  challenge_chance: 0.2         # chance a poll gets a check (demo: 0.5)
+  state_share: 0.3              # share of checks that are balance (Check C) questions
+  record_share: 0.4             # share that ask for a specific record #N; the rest ask for the latest hash
+  sweep_seconds: 15             # rolling sweep of every record this often
+  sweep_batch: 200
+
 layer1:
   mode: deception              # deception = decoy editor, real file untouched, attempted diff captured; block = refuse
   protected_paths:             # file commands trip only inside these
