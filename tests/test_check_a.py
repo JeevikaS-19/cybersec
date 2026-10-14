@@ -59,6 +59,9 @@ def test_t1d_swapped_entries_are_sequence_error(witness):
     assert a.send(third) == {"status": "rejected", "reason": "sequence_gap"}
     assert a.send(second)["status"] == "accepted"
     assert ("sequence_gap", "3", "entry_deleted") in _alerts(witness.db)
+    # The agent resends seq 3 after seq 2 is in: that rejected entry is now accepted late.
+    assert a.send(third)["status"] == "accepted"
+    assert ("late_entry", "3", "entries_reordered") in _alerts(witness.db)
 
 
 def test_t1d_wrong_prev_hash_is_chain_break(witness):
@@ -66,7 +69,7 @@ def test_t1d_wrong_prev_hash_is_chain_break(witness):
     a.send(a.next_entry())
     bad = a.make(2, "not-the-real-hash", ts(2))
     assert a.send(bad) == {"status": "rejected", "reason": "chain_break"}
-    assert ("chain_break", "2", "entries_reordered") in _alerts(witness.db)
+    assert ("chain_break", "2", "entry_inserted") in _alerts(witness.db)
 
 
 def test_t1e_entry_signed_with_other_key_is_bad_signature(witness):
@@ -97,3 +100,22 @@ def test_t1g_one_bad_entry_does_not_cascade(witness):
     assert _alerts(witness.db) == [("bad_signature", "2", "forged")]
     _run(witness.db)
     assert _alerts(witness.db) == [("bad_signature", "2", "forged")]
+
+
+def test_swapped_stored_rows_are_entries_reordered(witness):
+    a = Agent(witness.url)
+    for _ in range(3):
+        a.send(a.next_entry())
+    conn = connect(witness.db)
+    try:
+        with conn:
+            id2, id3 = [r["id"] for r in conn.execute("SELECT id FROM entries WHERE seq IN (2, 3) ORDER BY seq")]
+            # Swap the insertion order of the stored rows for seq 2 and seq 3.
+            conn.execute("UPDATE entries SET id = -1 WHERE id = ?", (id2,))
+            conn.execute("UPDATE entries SET id = ? WHERE id = ?", (id2, id3))
+            conn.execute("UPDATE entries SET id = ? WHERE id = -1", (id3,))
+    finally:
+        conn.close()
+    _run(witness.db)
+    kinds = {(k, ref) for k, ref, _ in _alerts(witness.db)}
+    assert ("entries_reordered", "2") in kinds

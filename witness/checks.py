@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 from shared import GENESIS_PREV_HASH, hash_entry, verify_signature
+from witness.classify import for_rejection
 from witness.store import add_alert, get_state, set_state
 
 ENTRY_FIELDS = (
@@ -19,17 +20,11 @@ CHALLENGE_CHANCE = float(os.environ.get("CHALLENGE_CHANCE", "0.2"))
 STATE_SHARE = float(os.environ.get("STATE_SHARE", "0.5"))
 A_KINDS = {
     "sequence_gap", "chain_break", "bad_signature", "unknown_key_id", "entry_edited",
-    "entry_deleted", "entries_reordered", "challenge_mismatch", "bad_challenge_signature",
+    "entry_deleted", "entries_reordered", "entry_replayed", "late_entry", "challenge_mismatch",
+    "bad_challenge_signature",
 }
 B_KINDS = {"non_monotonic_timestamp", "silence", "missed_challenge", "bad_heartbeat", "replayed_heartbeat"}
 C_KINDS = {"balance_misreported", "db_edited_without_log"}
-
-TAMPER_FOR_REASON = {
-    "bad_signature": "forged",
-    "unknown_key_id": "forged",
-    "chain_break": "entries_reordered",
-    "non_monotonic_timestamp": "backdated",
-}
 
 def now():
     return time.time()
@@ -99,15 +94,16 @@ def submit_entry(conn, entry, now_ts, check_c=True):
     with conn:
         conn.execute(f"INSERT INTO entries ({columns}) VALUES ({placeholders})", values)
     if accepted:
+        if conn.execute("SELECT 1 FROM alerts WHERE kind = 'sequence_gap' AND ref = ?", (str(entry.get("seq")),)).fetchone():
+            # This seq was rejected earlier as a gap, so it arrived late.
+            add_alert(conn, "late_entry", entry.get("seq"), "entries_reordered",
+                      f"entry {entry.get('seq')} accepted after an earlier gap rejection", now_ts)
         if check_c:
             _replay_balances(conn, entry, now_ts)
         return {"status": "accepted"}
 
     seq = entry.get("seq")
-    tamper = TAMPER_FOR_REASON.get(reason)
-    if reason == "sequence_gap":
-        last_seq = last["seq"] if last else 0
-        tamper = "entry_replayed" if isinstance(seq, int) and seq <= last_seq else "entry_deleted"
+    tamper = for_rejection(reason, seq, last["seq"] if last else 0)
     add_alert(conn, reason, seq, tamper, f"entry {seq} rejected: {reason}", now_ts)
     return {"status": "rejected", "reason": reason}
 
@@ -117,8 +113,12 @@ def self_check(conn, now_ts):
         entry = {f: row[f] for f in ENTRY_FIELDS}
         if hash_entry(entry) != row["hash"]:
             add_alert(conn, "entry_edited", row["seq"], "entry_edited", "stored fields no longer match hash", now_ts)
-        elif prev is not None and row["seq"] != prev["seq"] + 1:
+        elif prev is not None and row["seq"] > prev["seq"] + 1:
             add_alert(conn, "entry_deleted", row["seq"], "entry_deleted", f"seq jumps from {prev['seq']} to {row['seq']}", now_ts)
+        elif prev is not None and row["seq"] == prev["seq"]:
+            add_alert(conn, "entry_replayed", row["seq"], "entry_replayed", f"seq {row['seq']} stored twice", now_ts)
+        elif prev is not None and row["seq"] < prev["seq"]:
+            add_alert(conn, "entries_reordered", row["seq"], "entries_reordered", f"seq {row['seq']} stored after {prev['seq']}", now_ts)
         elif prev is not None and row["prev_hash"] != prev["hash"]:
             add_alert(conn, "entries_reordered", row["seq"], "entries_reordered", "prev_hash does not link", now_ts)
         prev = row
