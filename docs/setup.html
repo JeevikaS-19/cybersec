@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chain of Custody · Setup</title>
+<style>
+:root{--bg:#f7f8fb;--surface:#fff;--ink:#0f172a;--muted:#5b6478;--line:#dde2ea;--accent:#0f766e;--accent-soft:#ccfbf1;--warn:#b45309;--warn-soft:#fef3c7;--code:#0f172a;--code-text:#e2e8f0}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0b1020;--surface:#121a2e;--ink:#e6eaf2;--muted:#94a0b8;--line:#24304a;--accent:#2dd4bf;--accent-soft:#0f3b38;--warn:#fbbf24;--warn-soft:#3a2a0a;--code:#070b16;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b1020;--surface:#121a2e;--ink:#e6eaf2;--muted:#94a0b8;--line:#24304a;--accent:#2dd4bf;--accent-soft:#0f3b38;--warn:#fbbf24;--warn-soft:#3a2a0a;--code:#070b16;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;padding:0 16px}
+main{max-width:820px;margin:0 auto;padding:40px 0 64px}
+h1{font-size:2rem;margin:0 0 .3em;letter-spacing:-.02em}
+h2{font-size:1.4rem;margin:2.2em 0 .4em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:1.4em 0 .3em}
+p,li{color:var(--ink)} .lead,.muted{color:var(--muted)}
+code{font:14px ui-monospace,Consolas,monospace;background:var(--surface);padding:1px 5px;border-radius:5px;border:1px solid var(--line)}
+pre{background:var(--code);color:var(--code-text);padding:12px 14px;border-radius:10px;overflow-x:auto;font:14px/1.55 ui-monospace,Consolas,monospace}
+.done{background:var(--accent-soft);border-left:4px solid var(--accent);padding:8px 12px;border-radius:6px;margin:.6em 0}
+.warn{background:var(--warn-soft);border-left:4px solid var(--warn);padding:8px 12px;border-radius:6px;margin:.6em 0}
+.tracks{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:24px 0}
+.track{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.track a{color:var(--accent);text-decoration:none;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:15px;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:block;overflow-x:auto}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+footer{margin-top:40px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<p class="muted">Chain of Custody · Setup guide</p>
+<h1>Set up Chain of Custody</h1>
+<p class="lead">Chain of Custody watches a platform's database from outside the platform. It seals every transaction, lets an independent witness check the seals, and reports anything that was changed. Three tracks, in order:</p>
+
+<div class="tracks">
+  <div class="track"><strong>1 · Try it</strong><p class="muted">Run the whole product on one laptop and attack it. 10 minutes.</p><a href="#try">Go</a></div>
+  <div class="track"><strong>2 · Connect your platform</strong><p class="muted">The real setup. Five steps, each with a check.</p><a href="#connect">Go</a></div>
+  <div class="track"><strong>3 · Turn on Stop</strong><p class="muted">Optional. Locks users out when the witness is unreachable. Read the warning first.</p><a href="#stop">Go</a></div>
+</div>
+
+<h2 id="try">1 · Try it on one laptop</h2>
+<p>You need Docker Desktop running, and Python 3.11+.</p>
+<pre>git clone https://github.com/JeevikaS-19/cybersec.git
+cd cybersec
+python docker/ctl.py up</pre>
+<p>Open <code>http://127.0.0.1:8000/</code>. Everything should be green within about 10 seconds.</p>
+<div class="done"><strong>Done when:</strong> the page shows <em>Connected</em> with all three checks green.</div>
+<p>Then attack it:</p>
+<pre>python docker/ctl.py intruder       # edits the log over SSH, Layer 1 catches it
+python docker/ctl.py tamper-record # changes a transaction in the bank database, Layer 2 catches it
+python docker/ctl.py cut           # unplugs the server; after 45 s it quarantines itself
+python docker/ctl.py restore       # plug it back in; two key holders unlock it
+python docker/ctl.py reset         # start again from scratch</pre>
+
+<h2 id="connect">2 · Connect your platform</h2>
+<p class="muted">You need: a PostgreSQL or SQLite database with a transactions table and an accounts table, and a Linux server (or VM) where the platform runs. Nothing in your application code changes.</p>
+
+<h3>Step 1 · Read-only database user</h3>
+<pre>CREATE ROLE coc_reader LOGIN PASSWORD '&lt;a strong password&gt;';
+GRANT SELECT ON transactions, accounts TO coc_reader;</pre>
+<div class="done"><strong>Done when:</strong> <code>SELECT has_table_privilege('coc_reader','transactions','UPDATE');</code> returns <code>f</code>.</div>
+
+<h3>Step 2 · Describe your tables</h3>
+<p>Copy <code>config/platform.yaml</code> and change the names to yours. Amounts are whole paise, or decimal rupees with <code>amount_unit: rupees</code>. The password is never written in this file; it comes from an environment variable.</p>
+<table>
+  <tr><th>Key</th><th>What it means</th></tr>
+  <tr><td><code>transactions.table</code>, <code>columns.row_id</code></td><td>Your table, and an increasing id column</td></tr>
+  <tr><td><code>columns.from_account</code>, <code>to_account</code></td><td>Account columns. A NULL side means money from or to outside (deposit, withdrawal)</td></tr>
+  <tr><td><code>columns.amount</code>, <code>amount_unit</code></td><td>The amount column and its unit (<code>paise</code> or <code>rupees</code>)</td></tr>
+  <tr><td><code>columns.from_balance</code>, <code>to_balance</code></td><td>Optional: balances after each transaction, if your table stores them</td></tr>
+  <tr><td><code>where</code></td><td>Optional filter, e.g. <code>status = 'completed'</code></td></tr>
+  <tr><td><code>accounts.table</code>, <code>id</code>, <code>balance</code></td><td>Your accounts table and its balance column</td></tr>
+</table>
+<div class="done"><strong>Done when:</strong> the agent starts without <code>platform source unavailable</code> in its log.</div>
+
+<h3>Step 3 · Install the agent on the platform server</h3>
+<pre>sudo COC_PLATFORM_CONFIG=/opt/coc/config/platform.yaml \
+     WITNESS_URL=https://&lt;your witness address&gt; \
+     COC_DB_DSN='postgresql://coc_reader:&lt;password&gt;@127.0.0.1:5432/&lt;database&gt;' \
+     COC_PROTECTED_PATH=/var/log/&lt;your-app&gt; COC_L3_DRY_RUN=1 \
+     bash deploy/install-log-server.sh</pre>
+<p>Then register the profile-id your admins will use with guarded commands (stored only as a hash):</p>
+<pre>sudo bash -c 'cd /opt/coc &amp;&amp; PYTHONPATH=/opt/coc venv/bin/python -m layers.l1_tripwire.profiles add &lt;platform name&gt;'</pre>
+<p>Keep <code>COC_L3_DRY_RUN=1</code> until you finish Step 5.</p>
+<div class="done"><strong>Done when:</strong> <code>systemctl is-active coc-agent coc-backstop</code> prints <code>active</code> twice.</div>
+
+<h3>Step 4 · Witness</h3>
+<p>Run the witness on its own server (never the platform server), or use one you were given:</p>
+<pre>sudo PORT=8810 PREFIX=/custody bash deploy/install-witness.sh</pre>
+<p>Put it behind your HTTPS address. Then hand one key-holder share to each of three people and delete the files from the server.</p>
+<div class="done"><strong>Done when:</strong> <code>https://&lt;your witness address&gt;/custody/</code> shows the auditor view with <em>Connected</em>.</div>
+
+<h3>Step 5 · Test one transaction</h3>
+<ol>
+  <li>Make a deposit or transfer in your platform.</li>
+  <li>Watch the auditor view: the records-verified count goes up, and no alert appears.</li>
+  <li>Make a reversible test change on one demo row (ask your witness owner for the steps). The page must show the record in red within about 15 seconds. Put the value back.</li>
+</ol>
+<div class="done"><strong>Done when:</strong> the honest transaction shows as verified and the test change is caught.</div>
+
+<h2 id="stop">3 · Turn on Stop (optional)</h2>
+<div class="warn"><strong>Read before you start.</strong> Stop locks every login account on the server, root included, ends their sessions, and stops your application if the witness is unreachable for 45 seconds. A network blip can lock out the people who need to fix it. Only turn this on after you have a recovery path that does not use the network (for example a hypervisor console or a break-glass account kept offline).</div>
+<ol>
+  <li><strong>Recovery first.</strong> Write down and test how you get back in with no network. Do not continue until you have done this.</li>
+  <li><strong>Set the stop and start commands</strong> for your application in <code>layer3</code> of <code>config/layers.yaml</code>, e.g. stopping your frontend container.</li>
+  <li><strong>Trial run.</strong> Keep <code>dry_run: true</code>. Cut the network for 50 seconds and check the page shows what <em>would</em> happen.</li>
+  <li><strong>Switch it on</strong> on a test copy of the server first, then on the real server, by reinstalling with <code>COC_L3_DRY_RUN=0</code>.</li>
+</ol>
+<div class="done"><strong>Done when:</strong> a planned cut locks the test accounts, and two key holders can unlock them and get back in.</div>
+
+<h2>If something goes wrong</h2>
+<table>
+  <tr><th>Symptom</th><th>Check</th></tr>
+  <tr><td>Agent says <em>platform source unavailable</em></td><td>The DSN in <code>/etc/coc/coc.env</code>, and that the <code>coc_reader</code> role can connect</td></tr>
+  <tr><td>Witness shows no records</td><td><code>WITNESS_URL</code> in <code>/etc/coc/coc.env</code>, and the proxy path (<code>/custody</code>)</td></tr>
+  <tr><td>Honest transactions raise alerts</td><td>The platform writes the balance and the transaction separately; the witness re-checks before alerting. Confirm the transaction row exists before reporting.</td></tr>
+  <tr><td>Admin edits show as intruder</td><td>The admin must use the profile-id: <code>nano --&lt;profile-id&gt; file</code></td></tr>
+</table>
+
+<h2>Undo everything</h2>
+<pre>sudo systemctl disable --now coc-agent coc-backstop
+sudo rm -rf /opt/coc /opt/trip /etc/coc /var/lib/coc /var/spool/coc /etc/systemd/system/coc-*.service /etc/profile.d/coc-*.sh
+sudo systemctl daemon-reload</pre>
+<p class="muted">Then drop the <code>coc_reader</code> role from the database.</p>
+
+<footer>Chain of Custody · Team Firewall Crew · Hackurity 2026</footer>
+</main>
+</body>
+</html>
