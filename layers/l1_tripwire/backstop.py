@@ -224,7 +224,8 @@ def handle(path, ev, markers, cfg, recent):
               "mode": "backstop", "result": "changed the real file",
               "rule": f"{path} changed outside the tripwire (full path, another tool or temp-file rename)",
               "suspects": [{k: v for k, v in s.items() if k != "files"} for s in writers[:5]]}
-    e = events.make_event(1, "backstop:write", detail, process=who["cmd"].split()[0] if who else None,
+    e = events.make_event(1, "backstop:write", detail, tamper_type="l1_bypass",
+                          process=who["cmd"].split()[0] if who else None,
                           exe=who["exe"] if who else None)
     if who:
         e["who"].update({k: who[k] for k in ("uid", "user", "auid", "src_ip")})

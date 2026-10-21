@@ -3,6 +3,7 @@
 TAMPER_TYPES = frozenset({
     "entry_edited", "entry_deleted", "entries_reordered", "entry_replayed", "entry_inserted",
     "backdated", "forged", "agent_silenced", "balance_misreported", "db_edited_without_log",
+    "l1_bypass",
 })
 
 _BY_REASON = {

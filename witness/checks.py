@@ -1,5 +1,6 @@
 """Witness logic for Check A (sealed chain) and Check B (outside witness). No HTTP here."""
 
+import json
 import random
 import secrets
 import time
@@ -119,9 +120,10 @@ def submit_entry(conn, entry, now_ts, check_c=True):
         return {"status": "accepted"}
     reason = _reject_reason(conn, entry, last)
     accepted = reason is None
-    columns = ", ".join(ENTRY_FIELDS + ("signature", "accepted"))
-    placeholders = ", ".join("?" for _ in ENTRY_FIELDS + ("signature", "accepted"))
-    values = [entry.get(f) for f in ENTRY_FIELDS] + [entry.get("signature"), int(accepted)]
+    body_json = json.dumps({f: entry.get(f) for f in ENTRY_FIELDS}, sort_keys=True) if accepted else None
+    columns = ", ".join(ENTRY_FIELDS + ("signature", "accepted", "body_json"))
+    placeholders = ", ".join("?" for _ in ENTRY_FIELDS + ("signature", "accepted", "body_json"))
+    values = [entry.get(f) for f in ENTRY_FIELDS] + [entry.get("signature"), int(accepted), body_json]
     with conn:
         conn.execute(f"INSERT INTO entries ({columns}) VALUES ({placeholders})", values)
     if accepted:
@@ -138,6 +140,28 @@ def submit_entry(conn, entry, now_ts, check_c=True):
     add_alert(conn, reason, seq, tamper, f"entry {seq} rejected: {reason}", now_ts)
     return {"status": "rejected", "reason": reason}
 
+
+def _edited_detail(row):
+    """Return a human-readable string naming which fields changed and their old → new values.
+
+    The accepted body is stored in body_json at submission time. If it is missing (rows accepted
+    before this column existed) fall back to the generic message so old data never breaks.
+    """
+    raw = row["body_json"] if "body_json" in row.keys() else None
+    if not raw:
+        return "stored fields no longer match hash"
+    original = json.loads(raw)
+    changed = []
+    for f in ENTRY_FIELDS:
+        orig_val = original.get(f)
+        curr_val = row[f]
+        if orig_val != curr_val:
+            changed.append(f"{f}: {orig_val!r} → {curr_val!r}")
+    if changed:
+        return "; ".join(changed)
+    return "stored fields no longer match hash"
+
+
 def self_check(conn, now_ts):
     rows = list(conn.execute("SELECT * FROM entries WHERE accepted = 1 ORDER BY id"))
     seqs = {r["seq"] for r in rows}
@@ -148,7 +172,8 @@ def self_check(conn, now_ts):
     for row in rows:
         entry = {f: row[f] for f in ENTRY_FIELDS}
         if hash_entry(entry) != row["hash"]:
-            add_alert(conn, "entry_edited", row["seq"], "entry_edited", "stored fields no longer match hash", now_ts)
+            detail = _edited_detail(row)
+            add_alert(conn, "entry_edited", row["seq"], "entry_edited", detail, now_ts)
         elif prev is not None and row["seq"] == prev["seq"]:
             add_alert(conn, "entry_replayed", row["seq"], "entry_replayed", f"seq {row['seq']} stored twice", now_ts)
         elif prev is not None and row["seq"] < prev["seq"]:

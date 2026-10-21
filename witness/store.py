@@ -93,6 +93,9 @@ def init_db(db_path):
         if "txn_time" not in {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}:
             conn.execute("ALTER TABLE entries ADD COLUMN txn_time TEXT")
             conn.commit()
+        if "body_json" not in {r["name"] for r in conn.execute("PRAGMA table_info(entries)")}:
+            conn.execute("ALTER TABLE entries ADD COLUMN body_json TEXT")
+            conn.commit()
     finally:
         conn.close()
 

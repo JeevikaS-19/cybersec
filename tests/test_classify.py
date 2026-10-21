@@ -32,3 +32,34 @@ def test_unknown_tamper_type_is_stored_with_warning(tmp_path, capsys):
         conn.close()
     assert row["tamper_type"] == "not_a_tamper_type"
     assert "WARNING" in capsys.readouterr().out
+
+
+def test_t9b_edited_amount_paise_detail_names_the_field(witness):
+    """T9b: edit amount_paise of a stored entry; /alerts must name the field and old/new values."""
+    import requests
+
+    from tests.helpers import Agent
+    from witness import checks
+    from witness.store import connect
+
+    a = Agent(witness.url)
+    for _ in range(3):
+        assert a.send(a.next_entry())["status"] == "accepted"
+
+    # Attacker edits the bank's stored row for seq=2 directly in the witness DB.
+    conn = connect(witness.db)
+    try:
+        with conn:
+            conn.execute("UPDATE entries SET amount_paise = 200 WHERE seq = 2")
+        checks.self_check(conn, checks.now())
+    finally:
+        conn.close()
+
+    alerts = requests.get(f"{witness.url}/alerts", timeout=5).json()["alerts"]
+    edited = [a for a in alerts if a["kind"] == "entry_edited"]
+    assert len(edited) == 1, f"expected 1 entry_edited alert, got {edited}"
+    assert edited[0]["tamper_type"] == "entry_edited"
+    detail = edited[0]["detail"]
+    assert "amount_paise" in detail, f"detail missing field name: {detail!r}"
+    assert "100" in detail, f"detail missing old value 100: {detail!r}"
+    assert "200" in detail, f"detail missing new value 200: {detail!r}"

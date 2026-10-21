@@ -181,3 +181,106 @@ def test_editors_scope_protected_only_trips_inside_protected_paths(tmp_path, mon
     assert layer_events.pending() == []  # everyday editing elsewhere: no alert
     trip.run("nano", [str(log)])
     assert [json.loads(p.read_text())["trigger"] for p in layer_events.pending()] == ["wrapper:nano"]
+
+
+def test_t6a_full_path_bypass_caught_by_auditd_backstop(witness, tmp_path, monkeypatch):
+    """T6a: attacker uses /usr/bin/nano to bypass the wrapper; backstop catches it and feeds Layer 1 alert.
+
+    No Docker or inotify needed: we call backstop.handle() directly with a mocked suspects() and
+    Markers, then have the agent sign and ship the resulting spool event to the witness.
+    """
+    from layers.l1_tripwire import backstop
+    from agent import agent as agent_mod
+
+    # ---- env setup ----
+    spool = tmp_path / "spool"
+    monkeypatch.setenv("COC_SPOOL", str(spool))
+    monkeypatch.setenv("PYTHONPATH", str(REPO))
+
+    # ---- mock suspects(): one process that opened the file using full path ----
+    fake_suspect = {
+        "pid": 9001, "uid": 1001, "user": "attacker", "auid": 1001,
+        "exe": "/usr/bin/nano", "cmd": "/usr/bin/nano /var/log/bank/app.log",
+        "src_ip": "10.0.0.2", "tty": "pts/0", "files": ["/var/log/bank"],
+    }
+    monkeypatch.setattr(backstop, "suspects", lambda path: [fake_suspect])
+
+    # ---- mock Markers: no valid authorization ----
+    class _NoMarkers:
+        def refresh(self): pass
+        def covers(self, path, uids): return None
+
+    # ---- call handle() to emit a spool event ----
+    protected_path = "/var/log/bank/app.log"
+    cfg = {"watch": ["/var/log/bank"], "allowed_writers": []}
+    recent = {}
+    e = backstop.handle(protected_path, "MODIFY", _NoMarkers(), cfg, recent)
+    assert e is not None, "backstop.handle() returned None — event was not emitted"
+    assert e["trigger"] == "backstop:write"
+    assert e["tamper_type"] == "l1_bypass"
+    assert e["detail"]["target"] == protected_path
+    assert "/usr/bin/nano" in e["detail"]["cmd"]
+
+    # ---- register an agent and ship the spooled event to the witness ----
+    monkeypatch.setattr(agent_mod, "WITNESS_URL", witness.url)
+    monkeypatch.setattr(agent_mod, "AGENT_DB_PATH", str(tmp_path / "agent.db"))
+    conn = agent_mod.open_db()
+    priv = agent_mod.load_or_create_key(conn)
+    agent_mod.register(conn, priv)
+    agent_mod.ship_events(conn, priv)
+    conn.close()
+
+    # ---- assert the witness recorded a layer1_tripwire alert with tamper_type=l1_bypass ----
+    alerts = _alerts(witness.url)
+    backstop_alerts = [a for a in alerts if a["kind"] == "layer1_tripwire" and a["tamper_type"] == "l1_bypass"]
+    assert len(backstop_alerts) == 1, f"expected 1 l1_bypass alert, got: {alerts}"
+    detail = backstop_alerts[0]["detail"]
+    assert "backstop" in detail, f"detail should mention backstop mode: {detail!r}"
+    assert "/usr/bin/nano" in detail or "attacker" in detail, f"detail should attribute the bypass: {detail!r}"
+
+    status = requests.get(f"{witness.url}/status", timeout=5).json()
+    assert status["layers"]["1"] == "tripped"
+    assert status["state"] == "alert"
+
+
+def test_t5c_rename_over_log_caught_by_wrapper(tmp_path, monkeypatch):
+    """T5c: attacker creates a temp file and renames it over the real log via mv.
+
+    Deception mode: mv is a guarded file_command — wrapper fires an alert and returns 0 without
+    touching the real file. Block mode: returns 1. Authorized mv with profile-id runs for real.
+    """
+    from layers.l1_tripwire import profiles, trip
+
+    log = _l1_env(tmp_path, monkeypatch, "deception")
+    fake = tmp_path / "fake.log"
+    fake.write_text("FORGED CONTENT\n")
+
+    # Deception mode: wrapper fires wrapper:mv alert, real log untouched, returns 0.
+    assert trip.run("mv", [str(fake), str(log)]) == 0
+    assert log.read_text() == "txn-1\n", "real log must be untouched in deception mode"
+    spooled = list(layer_events.pending())
+    assert len(spooled) == 1
+    ev = json.loads(spooled[0].read_text())
+    assert ev["trigger"] == "wrapper:mv"
+    assert ev["state"] == "alert"
+    assert str(log) in ev["detail"]["cmd"]
+
+    # Block mode: wrapper refuses the rename, returns 1, log still untouched.
+    monkeypatch.setenv("COC_L1_MODE", "block")
+    fake.write_text("FORGED CONTENT v2\n")  # fake still present (deception didn't move it)
+    assert trip.run("mv", [str(fake), str(log)]) == 1
+    assert log.read_text() == "txn-1\n", "real log must be untouched in block mode"
+    states = [json.loads(p.read_text())["state"] for p in layer_events.pending()]
+    assert states.count("alert") == 2  # both mv attempts produced alerts
+
+    # Authorized mv (profile-id): the real mv runs (mocked here), event is normal, not an alert.
+    monkeypatch.setenv("COC_L1_MODE", "deception")
+    profiles.add("demo-bank", "bank-mv-test")
+    monkeypatch.setattr(trip, "exec_real", lambda name, args: 0)
+    assert trip.run("mv", ["--bank-mv-test", str(fake), str(log)]) == 0
+    auth_events = [json.loads(p.read_text()) for p in layer_events.pending()
+                   if json.loads(p.read_text())["trigger"] == "authorized:mv"]
+    assert len(auth_events) == 1
+    assert auth_events[0]["state"] == "normal"
+    assert auth_events[0]["detail"]["profile"] == "demo-bank"
+    assert "bank-mv-test" not in json.dumps(auth_events[0])
